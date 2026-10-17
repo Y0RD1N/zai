@@ -21,7 +21,8 @@ export function makeProject(name: string, color = colors[0], starter = false): P
     panels.push({ ...makePanel('browser', 2), x: 35, y: 450, width: 565, height: 295 })
     panels.push({ ...makePanel('note', 3), x: 640, y: 490, width: 270, height: 240, note: 'Una idea para empezar…\n\n¿Qué quieres construir?\n¿Quién se encarga de cada parte?\n\nEste espacio es tuyo. ✦' })
   }
-  return { id: uid(), name, color, folder: '', panels, pan: { x: 305, y: 137 }, zoom: 0.9 }
+  const zoom = typeof window === 'undefined' ? 0.9 : clamp(Math.min((window.innerWidth - 345) / 910, (window.innerHeight - 284) / 745, 0.9), 0.35, 0.9)
+  return { id: uid(), name, color, folder: '', panels, pan: { x: 305, y: 137 }, zoom }
 }
 export function initialWorkspace(): Workspace {
   const project = makeProject('Zai', colors[0], true)

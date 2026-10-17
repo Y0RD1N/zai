@@ -43,6 +43,7 @@ try {
   await page.reload()
   await page.getByRole('heading', { name: '¿Qué construimos hoy?' }).waitFor()
   await expect(page.locator('.folder-button')).toContainText('project')
+  await page.getByRole('button', { name: 'Encuadrar pizarra', exact: true }).click()
   await page.getByLabel('Contenido de la nota').fill('Nota conservada al reiniciar Electron')
   await page.getByLabel('Dirección del navegador').fill(url)
   await page.getByLabel('Dirección del navegador').press('Enter')
@@ -76,8 +77,12 @@ try {
     await page.locator('.save-status.saved').waitFor()
     id = await page.evaluate(async () => (await window.zai.load()).projects[0].panels.find((panel) => panel.kind === 'terminal').id)
   }
-  await page.evaluate(({ id }) => window.zai.writeTerminal(id, 'echo zai-terminal-ok\r'), { id })
-  await expect.poll(() => page.evaluate(() => window.__zaiTestOutput), { timeout: 10_000 }).toContain('zai-terminal-ok')
+  await page.evaluate(({ id }) => window.zai.writeTerminal(id, 'echo zai-terminal-ok > zai-terminal-check.txt\r'), { id })
+  await expect.poll(async () => {
+    try { return (await readFile(path.join(folder, 'zai-terminal-check.txt'), 'utf8')).trim() }
+    catch { return '' }
+  }, { timeout: 10_000 }).toBe('zai-terminal-ok')
+  await expect.poll(() => page.evaluate(() => window.__zaiTestOutput)).toContain('zai-terminal-ok')
   await page.getByRole('button', { name: 'Cerrar Terminal', exact: true }).click()
   console.log('✓ Terminal nativa ejecutada en la carpeta del proyecto')
 

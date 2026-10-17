@@ -1,6 +1,15 @@
 import { expect, test } from '@playwright/test'
 import type { Workspace } from '../src/types'
 
+test('los controles de las ventanas quedan accesibles en una pantalla pequeña', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Minimizar Navegador', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Restaurar Navegador', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Restaurar Navegador', exact: true }).click()
+  await expect(page.getByTestId('panel-browser')).toBeVisible()
+})
+
 test('mover, redimensionar y minimizar conserva la ventana y el borrador', async ({ page }) => {
   await page.goto('/')
   const panel = page.getByTestId('panel-codex')
