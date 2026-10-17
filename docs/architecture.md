@@ -100,7 +100,13 @@ instancia independiente de su proveedor. Minimizar y cambiar de proyecto oculta
 los componentes sin desmontarlos. Las sesiones siguen activas hasta cerrar su
 ventana o salir de la aplicación.
 
-La capa transformada de ventanas tiene su propio contexto de apilamiento, por
+La capa de ventanas usa `zoom` de CSS para dibujar texto y controles a la escala
+elegida, con desplazamiento mediante `left` y `top`. No se fuerza una capa de
+composición con `will-change: transform`: mantener una imagen de las ventanas y
+reescalarla suavizaba el texto al cambiar el zoom. Las coordenadas guardadas y los
+desplazamientos del ratón siguen expresándose en unidades de la pizarra.
+
+Esta capa tiene su propio contexto de apilamiento, por
 encima del título del proyecto y por debajo de los controles de la pizarra. La
 barra superior reúne las ventanas minimizadas de todos los proyectos. Restaurar
 desde esa lista cambia al proyecto correspondiente, lleva la ventana al frente
