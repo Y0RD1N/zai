@@ -93,6 +93,8 @@ try {
   const minimizedImage = await call('zai_browser_screenshot')
   expect(minimizedImage.isError, minimizedImage.content?.[0]?.text).not.toBe(true)
   expect(minimizedImage.content[0].type).toBe('image')
+  await expect(page.getByRole('button', { name: 'Restaurar Navegador', exact: true })).toBeVisible()
+  await expect(page.getByTestId('panel-browser')).not.toBeVisible()
   console.log('✓ La conexión sigue funcionando con el navegador minimizado')
 
   await page.getByRole('button', { name: 'Conexión Codex con Navegador', exact: true }).focus()
