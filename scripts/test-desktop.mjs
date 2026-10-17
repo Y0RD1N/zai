@@ -34,6 +34,13 @@ try {
   application = session.application
   let page = session.page
   expect(await page.evaluate(() => typeof window.zai.send)).toBe('function')
+  const catalogs = await page.evaluate(async () => Promise.all(['codex', 'claude'].map((provider) => window.zai.catalog(provider))))
+  for (const catalog of catalogs) {
+    expect(Array.isArray(catalog.models)).toBe(true)
+    expect(Array.isArray(catalog.usage.windows)).toBe(true)
+    expect(typeof catalog.defaults.model).toBe('string')
+  }
+  console.log('✓ Catálogos y uso de ambos proveedores a través del puente de escritorio')
   await page.locator('.save-status.saved').waitFor()
   await page.evaluate(async (folder) => {
     const workspace = await window.zai.load()

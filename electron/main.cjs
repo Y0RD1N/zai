@@ -3,6 +3,8 @@ const path = require('node:path')
 const fs = require('node:fs/promises')
 const os = require('node:os')
 const { createAgentManager, findExecutable, launch } = require('./agents.cjs')
+const { createProviderCatalog } = require('./providers.cjs')
+const { resolveSelection } = require('./provider-data.cjs')
 
 if (process.env.ZAI_USER_DATA) app.setPath('userData', process.env.ZAI_USER_DATA)
 app.setName('Zai')
@@ -19,7 +21,11 @@ const cancelledTerminals = new Set()
 const emit = (channel, payload) => {
   if (window && !window.isDestroyed()) window.webContents.send(channel, payload)
 }
-const agents = createAgentManager((event) => emit('agent:event', event))
+const catalogs = createProviderCatalog((event) => emit('provider:update', event))
+const agents = createAgentManager((event) => {
+  if (event.type === 'usage') catalogs.updateUsage(event.provider, event.usage)
+  else emit('agent:event', event)
+})
 const validId = (id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id)
 const allowedUrl = (url) => {
   try { return ['https:', 'http:'].includes(new URL(url).protocol) } catch { return false }
@@ -58,6 +64,10 @@ handle('project:choose', async () => {
 })
 handle('project:reveal', async (cwd) => shell.openPath(await directory(cwd)))
 handle('app:info', () => ({ platform: process.platform, version: app.getVersion(), home: os.homedir() }))
+handle('provider:catalog', (provider, refresh) => {
+  if (!['codex', 'claude'].includes(provider)) throw new Error('Proveedor inválido')
+  return catalogs.get(provider, refresh === true)
+})
 handle('app:providers', async () => {
   const probe = async (name) => {
     const executable = findExecutable(name)
@@ -90,8 +100,10 @@ handle('app:finish-close', async () => {
 handle('agent:send', async (request) => {
   if (!request || !validId(request.id) || !['codex', 'claude'].includes(request.provider) ||
       typeof request.text !== 'string' || !request.text.trim() || request.text.length > 200_000) throw new Error('Mensaje inválido')
+  for (const key of ['model', 'effort', 'speed']) if (request[key] !== undefined && (typeof request[key] !== 'string' || request[key].length > 200)) throw new Error('Configuración del agente inválida')
   await directory(request.cwd)
-  return agents.send(request)
+  const catalog = await catalogs.get(request.provider)
+  return agents.send({ ...request, ...resolveSelection(catalog, request) })
 })
 handle('agent:stop', (id) => { if (validId(id)) return agents.stop(id) })
 handle('agent:close', (id) => { if (validId(id)) agents.close(id) })
@@ -189,6 +201,7 @@ function shutdown() {
   if (quitting) return
   quitting = true
   agents.dispose()
+  catalogs.dispose()
   for (const terminal of terminals.values()) terminal.pty.kill()
   saving.catch(() => {}).finally(() => app.quit())
 }

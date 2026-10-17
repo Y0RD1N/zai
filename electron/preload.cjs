@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('zai', {
   revealFolder: (cwd) => ipcRenderer.invoke('project:reveal', cwd),
   info: () => ipcRenderer.invoke('app:info'),
   providers: () => ipcRenderer.invoke('app:providers'),
+  catalog: (provider, refresh = false) => ipcRenderer.invoke('provider:catalog', provider, refresh),
+  onProvider: (listener) => subscribe('provider:update', listener),
   external: (url) => ipcRenderer.invoke('app:external', url),
   window: (action) => ipcRenderer.invoke('app:window', action),
   finishClose: () => ipcRenderer.invoke('app:finish-close'),

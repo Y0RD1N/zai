@@ -13,8 +13,12 @@ a tu gusto o conviértelas en iconos sin detener sus sesiones.
 - Chats propios de Codex y Claude con respuestas en streaming, Markdown, herramientas,
   errores y solicitudes de permiso. Conexión a los agentes locales mediante sus
   interfaces oficiales.
+- Selectores de modelo, esfuerzo y velocidad por chat, consultados a cada agente.
+  Límites de cuenta con porcentajes y reinicios cuando el proveedor los publica.
+- Mensajes y herramientas en secuencia cronológica, conservada al reabrir la app.
 - Ventanas movibles y redimensionables, ampliación, iconos movibles y organización
-  automática. Los borradores y las páginas permanecen abiertos al minimizar.
+  automática. La barra superior reúne todas las ventanas minimizadas y permite
+  restaurarlas, incluso desde otro proyecto o fuera del área visible. Los borradores y las páginas permanecen abiertos al minimizar.
 - Proyectos con carpeta, conversaciones y distribución independientes. Cambiar de
   estancia mantiene los agentes activos.
 - Navegador Chromium integrado, navegación atrás y adelante, recarga y herramientas
@@ -47,7 +51,13 @@ ejecuta `codex login`. Para Claude, instala
 Zai utiliza sus sesiones locales y no requiere una clave API propia.
 
 Dentro de Zai, vincula la carpeta de un proyecto y escribe en un chat. El selector
-de modelo permite conservar el predeterminado de la CLI o indicar otro compatible.
+de modelo ofrece el catálogo de la CLI o un identificador personalizado. También
+puedes elegir esfuerzo y velocidad cuando el modelo los admita. El modo rápido
+puede consumir más cuota o tener un coste mayor. En «Uso» se muestran únicamente
+los periodos publicados por la cuenta (5 horas, semanal, mensual u otros), con
+su porcentaje y fecha de reinicio. Algunas conexiones por API o proveedores
+personalizados no exponen estos límites; Zai lo indica y muestra el consumo de
+la conversación cuando el agente lo informa.
 Las operaciones que el proveedor someta a aprobación aparecerán en el chat.
 
 `npm run dev:web` abre la vista previa en `http://127.0.0.1:4317`. En ese modo puedes
@@ -76,7 +86,7 @@ Si Fedora no tiene FUSE 2, puedes abrir el AppImage sin instalarlo utilizando el
 modo de extracción, también probado con el navegador y la terminal:
 
 ```sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.1.0.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.2.0.AppImage
 ```
 
 La versión inicial se ha probado localmente en Fedora. El workflow de CI está

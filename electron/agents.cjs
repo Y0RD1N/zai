@@ -4,6 +4,8 @@ const { existsSync } = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const { randomUUID } = require('node:crypto')
+const { codexUsage, claudeRateUsage } = require('./provider-data.cjs')
+const { version } = require('../package.json')
 
 function findExecutable(name) {
   const directories = [...(process.env.PATH || '').split(path.delimiter),
@@ -47,7 +49,7 @@ class CodexSession {
     this.active = false
     this.closed = false
   }
-  async initialize() {
+  async connect() {
     const executable = findExecutable('codex')
     if (!executable) throw new Error('Codex CLI no está instalado. Instálalo y ejecuta codex login desde una terminal.')
     this.child = launch(executable, ['app-server', '--listen', 'stdio://'], this.request.cwd)
@@ -63,14 +65,19 @@ class CodexSession {
     createInterface({ input: this.child.stdout }).on('line', (line) => {
       try { this.receive(JSON.parse(line)) } catch (error) { if (!(error instanceof SyntaxError)) this.fail(error) }
     })
-    await this.rpc('initialize', { clientInfo: { name: 'zai', title: 'Zai', version: '0.1.0' }, capabilities: { experimentalApi: true } })
+    await this.rpc('initialize', { clientInfo: { name: 'zai', title: 'Zai', version }, capabilities: { experimentalApi: true } })
     this.write({ method: 'initialized', params: {} })
+  }
+  async initialize() {
+    await this.connect()
     const params = { cwd: this.request.cwd, approvalPolicy: 'on-request', sandbox: 'workspace-write' }
     if (this.request.model) params.model = this.request.model
     const result = this.request.sessionId
       ? await this.rpc('thread/resume', { ...params, threadId: this.request.sessionId })
       : await this.rpc('thread/start', params)
     this.threadId = result.thread.id
+    this.defaultModel = result.model
+    this.defaultEffort = result.reasoningEffort
     this.emit({ type: 'session', sessionId: this.threadId, model: result.model })
   }
   write(frame) { if (!this.child?.stdin.destroyed) this.child.stdin.write(JSON.stringify(frame) + '\n') }
@@ -89,6 +96,11 @@ class CodexSession {
       return
     }
     const p = frame.params || {}
+    if (frame.method === 'account/rateLimits/updated') this.emit({ type: 'usage', provider: 'codex', usage: { ...codexUsage(p), partial: true } })
+    if (frame.method === 'thread/tokenUsage/updated' && p.tokenUsage?.total) {
+      const total = p.tokenUsage.total
+      this.emit({ type: 'metrics', metrics: { inputTokens: total.inputTokens || 0, outputTokens: total.outputTokens || 0 } })
+    }
     if (frame.id !== undefined && frame.method) {
       const requestId = String(frame.id)
       if (frame.method.includes('requestApproval') || frame.method.includes('requestUserInput') || frame.method.includes('elicitation/request')) {
@@ -130,12 +142,14 @@ class CodexSession {
     }
     if (frame.method === 'error') this.emit({ type: 'error', message: p.error?.message || p.message || 'Error de Codex' })
   }
-  async send(text, model) {
+  async send(text, selection = {}) {
     if (this.active) throw new Error('Espera a que termine el turno o detenlo primero.')
     this.active = true
     this.emit({ type: 'status', status: 'running' })
     try {
-      const result = await this.rpc('turn/start', { threadId: this.threadId, input: [{ type: 'text', text, text_elements: [] }], ...(model ? { model } : {}) })
+      const result = await this.rpc('turn/start', { threadId: this.threadId, input: [{ type: 'text', text, text_elements: [] }],
+        model: selection.model || this.defaultModel, effort: selection.effort || this.defaultEffort,
+        serviceTier: selection.speed && selection.speed !== 'default' ? selection.speed : 'default' })
       this.turnId = result.turn.id
     } catch (error) { this.active = false; throw error }
   }
@@ -178,7 +192,7 @@ class ClaudeSession {
     const sdk = await import('@anthropic-ai/claude-agent-sdk')
     this.query = sdk.query
   }
-  async send(text, model) {
+  async send(text, selection = {}) {
     if (this.active) throw new Error('Claude ya está trabajando en este chat.')
     this.active = true
     this.emit({ type: 'status', status: 'running' })
@@ -188,13 +202,15 @@ class ClaudeSession {
       cwd: this.request.cwd,
       pathToClaudeCodeExecutable: findExecutable('claude'),
       executable: findExecutable('node') || 'node',
-      env: { ...agentEnvironment(), CLAUDE_AGENT_SDK_CLIENT_APP: 'zai/0.1.0' },
+      env: { ...agentEnvironment(), CLAUDE_AGENT_SDK_CLIENT_APP: `zai/${version}` },
       permissionMode: 'default',
       includePartialMessages: true,
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       abortController: abort,
-      ...(model ? { model } : {}),
+      ...(selection.model ? { model: selection.model } : {}),
+      ...(selection.effort ? { effort: selection.effort } : {}),
+      settings: { fastMode: selection.speed === 'fast' },
       ...(this.sessionId ? { resume: this.sessionId } : {}),
       canUseTool: async (name, input, context) => {
         const requestId = randomUUID()
@@ -219,35 +235,53 @@ class ClaudeSession {
     this.consume(this.stream, abort).catch((error) => { if (!abort.signal.aborted) this.emit({ type: 'error', message: error.message }) })
   }
   async consume(stream, abort) {
-    let partial = ''
+    const streamedText = new Set()
+    let finished = false, finalError
     try {
       for await (const event of stream) {
         if (event.session_id && event.session_id !== this.sessionId) {
           this.sessionId = event.session_id
           this.emit({ type: 'session', sessionId: this.sessionId })
         }
+        if (event.type === 'rate_limit_event') {
+          const usage = claudeRateUsage(event.rate_limit_info)
+          if (usage) this.emit({ type: 'usage', provider: 'claude', usage })
+        }
+        if (event.type === 'system' && event.subtype === 'init') this.emit({ type: 'configuration', model: event.model, effort: event.effort, speed: event.fast_mode_state, speedReason: event.fast_mode_disabled_reason })
+        if (event.fast_mode_state && !(event.type === 'system' && event.subtype === 'init')) this.emit({ type: 'configuration', speed: event.fast_mode_state, speedReason: event.fast_mode_disabled_reason })
         if (event.type === 'stream_event') {
           const frame = event.event
-          if (frame.type === 'message_start') { this.messageId = frame.message.id; partial = '' }
+          if (frame.type === 'message_start') this.messageId = frame.message.id
+          if (frame.type === 'content_block_start' && frame.content_block.type === 'tool_use') {
+            const block = frame.content_block
+            this.emit({ type: 'tool', tool: { id: block.id, name: block.name, detail: 'Preparando argumentos…', status: 'running' } })
+          }
           if (frame.type === 'content_block_delta' && frame.delta.type === 'text_delta') {
-            partial += frame.delta.text
-            this.emit({ type: 'message', messageId: this.messageId, text: frame.delta.text, delta: true })
+            streamedText.add(this.messageId)
+            this.emit({ type: 'message', messageId: `${this.messageId}:text:${frame.index}`, text: frame.delta.text, delta: true })
           }
         }
         if (event.type === 'assistant') {
           const blocks = event.message.content || []
-          const text = blocks.filter((block) => block.type === 'text').map((block) => block.text).join('\n')
-          if (text) this.emit({ type: 'message', messageId: event.message.id, text, delta: false })
-          for (const block of blocks) if (block.type === 'tool_use') this.emit({ type: 'tool', tool: {
-            id: block.id, name: block.name, detail: String(block.input.command || block.input.file_path || block.input.description || JSON.stringify(block.input)).slice(0, 16_000), status: 'running',
-          } })
+          for (const [index, block] of blocks.entries()) {
+            if (block.type === 'text' && block.text && !streamedText.has(event.message.id)) this.emit({ type: 'message', messageId: `${event.message.id}:text:${index}`, text: block.text, delta: false })
+            if (block.type === 'tool_use') {
+              const input = block.input || {}
+              this.emit({ type: 'tool', tool: { id: block.id, name: block.name, detail: String(input.command || input.file_path || input.description || JSON.stringify(input)).slice(0, 16_000), status: 'running' } })
+            }
+          }
         }
         if (event.type === 'user' && Array.isArray(event.message.content)) for (const block of event.message.content) if (block.type === 'tool_result') {
           this.emit({ type: 'tool', tool: { id: block.tool_use_id, status: block.is_error ? 'failed' : 'completed', output: (typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '')).slice(-12_000) } })
         }
         if (event.type === 'result') {
-          if (event.is_error) this.emit({ type: 'error', message: event.errors?.join('\n') || event.result || 'Claude no pudo completar la respuesta.' })
-          else this.emit({ type: 'status', status: 'idle' })
+          finished = true
+          const totals = Object.values(event.modelUsage || {}).reduce((sum, value) => ({
+            inputTokens: sum.inputTokens + (value.inputTokens || 0) + (value.cacheReadInputTokens || 0) + (value.cacheCreationInputTokens || 0),
+            outputTokens: sum.outputTokens + (value.outputTokens || 0),
+          }), { inputTokens: 0, outputTokens: 0 })
+          this.emit({ type: 'metrics', metrics: { ...totals, costUsd: event.total_cost_usd } })
+          if (event.is_error) finalError = event.errors?.join('\n') || event.result || 'Claude no pudo completar la respuesta.'
         }
       }
     } finally {
@@ -255,6 +289,7 @@ class ClaudeSession {
       for (const [requestId, respond] of this.approvals) { respond({ allow: false }); this.emit({ type: 'resolved', requestId }) }
       this.approvals.clear()
       if (abort.signal.aborted) this.emit({ type: 'status', status: 'stopped' })
+      else if (finished) this.emit(finalError ? { type: 'error', message: finalError } : { type: 'status', status: 'idle' })
     }
   }
   async stop() { this.abort?.abort(); this.stream?.close() }
@@ -286,7 +321,7 @@ function createAgentManager(emit) {
         catch (error) { instance.close(); sessions.delete(request.id); emit({ id: request.id, type: 'error', message: error.message }); throw error }
         finally { initializing.delete(request.id) }
       }
-      try { await instance.send(request.text, request.model) }
+      try { await instance.send(request.text, request) }
       catch (error) { emit({ id: request.id, type: 'error', message: error.message }); throw error }
     },
     stop: (id) => {
@@ -299,4 +334,4 @@ function createAgentManager(emit) {
     dispose: () => { for (const instance of sessions.values()) instance.close(); sessions.clear() },
   }
 }
-module.exports = { createAgentManager, findExecutable, CodexSession, launch }
+module.exports = { createAgentManager, findExecutable, CodexSession, ClaudeSession, launch, agentEnvironment }
