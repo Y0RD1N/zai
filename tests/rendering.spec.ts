@@ -35,15 +35,15 @@ for (const density of [1, 1.25, 2]) test.describe(`Densidad ${density}`, () => {
     await expect.poll(async () => (await panel.boundingBox())!.width).toBeCloseTo(before.width + 45, 0)
 
     await panel.getByRole('button', { name: 'Configurar modelo de Claude', exact: true }).click()
-    const model = panel.getByRole('combobox', { name: 'Modelo de Claude', exact: true })
+    const model = page.getByRole('combobox', { name: 'Modelo de Claude', exact: true })
     await model.click()
     const trigger = (await model.boundingBox())!, menu = (await page.locator('.agent-select-popover').boundingBox())!
     expect(menu.x).toBeCloseTo(trigger.x, 0)
     expect(menu.y).toBeGreaterThanOrEqual(0)
     expect(menu.y + menu.height).toBeLessThanOrEqual(1000)
     await page.getByRole('option', { name: 'Otro modelo…', exact: true }).click()
-    await expect(panel.getByLabel('Identificador de modelo de Claude', { exact: true })).toBeVisible()
-    await panel.getByRole('button', { name: 'Cerrar configuración de Claude', exact: true }).click()
+    await expect(page.getByLabel('Identificador de modelo de Claude', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Cerrar configuración de Claude', exact: true }).click()
 
     await page.getByLabel('Conectar Claude · lado izquierdo', { exact: true }).click()
     await page.getByLabel('Conectar Navegador · lado derecho', { exact: true }).click()

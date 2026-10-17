@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Brain, ChevronDown, Gauge, LoaderCircle, RefreshCw, ShieldCheck, X, Zap } from 'lucide-react'
 import type { AgentRuntime, Panel, ProviderCatalog } from '../types'
 import { PermissionsSettings } from './PermissionsSettings'
@@ -30,6 +31,30 @@ export function AgentControls({ panel, catalog, loading, runtime, busy, open, se
   const container = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const [custom, setCustom] = useState(false)
+  const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number; width: number; maxHeight: number }>({ left: 12, top: 80, width: 420, maxHeight: 400 })
+  useLayoutEffect(() => {
+    if (!open) return
+    const source = trigger.current, composer = source?.closest('.composer'), panelElement = source?.closest('.floating-panel'), world = source?.closest('.project-world')
+    const locate = () => {
+      if (!source?.getClientRects().length) { setOpen(false); return }
+      const rect = (composer || source).getBoundingClientRect()
+      const width = Math.min(440, Math.max(320, rect.width), window.innerWidth - 24)
+      const above = rect.top - 76, below = window.innerHeight - rect.bottom - 12
+      const flip = above >= 240 || above >= below
+      setPosition({ left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)), width,
+        ...(flip ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }),
+        maxHeight: Math.max(80, Math.min(560, (flip ? above : below) - 8)) })
+    }
+    locate()
+    const resize = new ResizeObserver(locate)
+    if (composer) resize.observe(composer)
+    const changed = new MutationObserver(locate)
+    for (const element of [panelElement, world]) if (element) changed.observe(element, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] })
+    const scroll = (event: Event) => { if (!container.current?.contains(event.target as Node) && !(event.target as Element).closest?.('.agent-select-popover')) locate() }
+    document.addEventListener('scroll', scroll, true); window.addEventListener('resize', locate)
+    window.addEventListener('zai-panel-preview', locate)
+    return () => { resize.disconnect(); changed.disconnect(); document.removeEventListener('scroll', scroll, true); window.removeEventListener('resize', locate); window.removeEventListener('zai-panel-preview', locate) }
+  }, [open, setOpen])
   const models = catalog?.models || []
   const selected = models.find((model) => model.id === panel.model || model.resolvedModel === panel.model)
   const effective = selected || (!panel.model ? models.find((model) => model.id === catalog?.defaults.model) || models.find((model) => model.isDefault) : undefined)
@@ -43,7 +68,7 @@ export function AgentControls({ panel, catalog, loading, runtime, busy, open, se
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !document.querySelector('.agent-select-popover')) { event.stopPropagation(); setOpen(false); trigger.current?.focus() } }
     const outside = (event: PointerEvent) => {
       const target = event.target as HTMLElement
-      if (!container.current?.contains(target) && !target.closest('.agent-option-trigger, .agent-select-popover')) setOpen(false)
+      if (!container.current?.contains(target) && !target.closest('.agent-select-popover') && !(target.closest('.agent-option-trigger') && target.closest('.agent-chat') === trigger.current?.closest('.agent-chat'))) setOpen(false)
     }
     document.addEventListener('keydown', escape, true)
     document.addEventListener('pointerdown', outside)
@@ -61,8 +86,9 @@ export function AgentControls({ panel, catalog, loading, runtime, busy, open, se
     <button className="agent-option-trigger effort-button" aria-label={`Configurar esfuerzo de ${panel.title}`} onClick={() => { setSection('model'); setOpen(section !== 'model' || !open) }} title={budget ? `Presupuesto de razonamiento: ${budget.toLocaleString('es')} tokens` : `Esfuerzo: ${currentEffort ? effortName(currentEffort) : 'predeterminado'}`}><Brain size={12} /><span>{budget ? 'Por tokens' : panel.effort ? effortName(panel.effort) : 'Auto'}</span></button>
     <button className={`agent-option-trigger speed-button ${panel.speed !== 'default' ? 'fast' : ''}`} aria-label={`Configurar velocidad de ${panel.title}`} onClick={() => { setSection('model'); setOpen(section !== 'model' || !open) }} title={`Velocidad: ${speed?.name || 'estándar'}`}><Zap size={12} /><span>{speed?.name || 'Estándar'}</span></button>
     <button className="agent-option-trigger permission-button" aria-label={`Configurar permisos de ${panel.title}`} onClick={() => { setSection('permissions'); setOpen(section !== 'permissions' || !open) }} title={`Permisos: ${permissionLabel(panel)}`}><ShieldCheck size={12} /><span>{permissionLabel(panel)}</span></button>
-    {open && <div ref={container} className="agent-options" role="region" aria-label={`Configuración de ${panel.title}`}>
+    {open && createPortal(<div ref={container} className="agent-options" style={position} role="region" aria-label={`Configuración de ${panel.title}`}>
       <div className="agent-options-heading"><div className="agent-options-tabs"><button className={section === 'model' ? 'active' : ''} onClick={() => setSection('model')}>Modelo</button><button className={section === 'permissions' ? 'active' : ''} onClick={() => setSection('permissions')}>Permisos</button><button className={section === 'usage' ? 'active' : ''} onClick={() => setSection('usage')}>Uso</button></div><button className="icon-button" disabled={loading} title="Actualizar modelos y uso" aria-label={`Actualizar modelos y uso de ${panel.title}`} onClick={refresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button><button className="icon-button" onClick={() => setOpen(false)} aria-label={`Cerrar configuración de ${panel.title}`}><X size={13} /></button></div>
+      <div className="agent-options-body">
       {catalog?.error && <p className="provider-note provider-error" role="status">{catalog.error}</p>}
       {!window.zai && <p className="provider-note">Abre la app de escritorio para consultar tus modelos y límites.</p>}
       {loading && !catalog && <p className="provider-note" role="status">Consultando al agente…</p>}
@@ -98,6 +124,7 @@ export function AgentControls({ panel, catalog, loading, runtime, busy, open, se
       {catalog?.usage.note && <p className="provider-note">{catalog.usage.note}</p>}
       {runtime.metrics && <div className="conversation-usage"><span>Esta conversación</span><strong>{(runtime.metrics.inputTokens + runtime.metrics.outputTokens).toLocaleString('es')} tokens</strong>{typeof runtime.metrics.costUsd === 'number' && <small>{panel.kind === 'zai' ? 'Coste informado' : 'Coste estimado'}: {runtime.metrics.costUsd.toLocaleString('es', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 })}</small>}</div>}
       {catalog && <p className="usage-updated">Consultado {new Date(catalog.usage.updatedAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })} · actualización automática</p>}</>}
-    </div>}
+      </div>
+    </div>, document.body)}
   </>
 }

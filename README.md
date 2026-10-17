@@ -210,7 +210,7 @@ Si Fedora no tiene FUSE 2, puedes abrir el AppImage sin instalarlo utilizando el
 modo de extracción, también probado con el navegador y la terminal:
 
 ```sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.5.0-Linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 /ruta/al/archivo.AppImage
 ```
 
 La versión inicial se ha probado localmente en Fedora. El workflow de CI está

@@ -18,6 +18,7 @@ async function mockAgents(page: import('@playwright/test').Page, noLimits = fals
       providers: async () => ({ codex: { installed: true }, claude: { installed: true } }),
       catalog: async (provider: string) => { const data = catalog(provider); return noLimits ? { ...data, usage: { windows: [], updatedAt: Date.now(), note: 'Esta conexión no publica límites de cuenta.' } } : data }, onProvider: () => () => {},
       chooseFolder: async () => '/tmp/zai-test',
+      apiProfiles: async () => [{ id: 'fixture', name: 'Fixture', kind: 'compatible', model: 'zai-balanced', baseUrl: 'https://fixture.invalid', hasKey: true }], apiCatalog: async () => catalog('zai'),
       onAgent: (callback: (event: unknown) => void) => { listener = callback; return () => {} },
       send: async (request: { id: string; provider: string }) => {
         localStorage.setItem(`request-${request.provider}`, JSON.stringify(request))
@@ -34,6 +35,46 @@ async function mockAgents(page: import('@playwright/test').Page, noLimits = fals
   }, { noLimits })
 }
 
+for (const provider of ['codex', 'claude', 'zai'] as Provider[]) {
+  test(`${provider}: configuración legible y botón compacto en ventanas amplias y pequeñas`, async ({ page }) => {
+    await mockAgents(page)
+    await page.goto('/')
+    if (provider === 'zai') await page.getByRole('button', { name: 'Añadir Zai Agent', exact: true }).click()
+    await page.locator('.save-status.saved').waitFor()
+    for (const bounds of [{ width: 1360, height: 760, zoom: 1 }, { width: 300, height: 240, zoom: .65 }]) {
+      await page.evaluate(({ provider, bounds }) => {
+        const workspace = JSON.parse(localStorage.getItem('zai.workspace.v1')!)
+        const project = workspace.projects[0], panel = project.panels.find((p: { kind: string }) => p.kind === provider)
+        Object.assign(panel, { x: 0, y: 0, width: bounds.width, height: bounds.height, connectionId: 'fixture' })
+        project.panels = [panel]; project.pan = { x: 220, y: 120 }; project.zoom = bounds.zoom
+        localStorage.setItem('zai.workspace.v1', JSON.stringify(workspace))
+      }, { provider, bounds })
+      await page.reload()
+      const panel = page.getByTestId(`panel-${provider}`), title = provider === 'zai' ? 'Zai Agent' : provider === 'codex' ? 'Codex' : 'Claude'
+      const trigger = panel.getByRole('button', { name: `Configurar modelo de ${title}`, exact: true })
+      const button = (await trigger.boundingBox())!
+      expect(button.width).toBeLessThanOrEqual(221)
+      expect(button.width).toBeGreaterThan(30)
+      await trigger.click()
+      const settings = page.getByRole('region', { name: `Configuración de ${title}`, exact: true })
+      await expect(settings.getByRole('combobox', { name: `Modelo de ${title}`, exact: true })).toBeVisible()
+      await expect(settings.getByRole('combobox', { name: `Esfuerzo de ${title}`, exact: true })).toBeVisible()
+      const popup = (await settings.boundingBox())!
+      expect(popup.height).toBeGreaterThan(180)
+      expect(popup.width).toBeLessThanOrEqual(440)
+      expect(popup.y).toBeGreaterThanOrEqual(64)
+      expect(popup.y + popup.height).toBeLessThanOrEqual(1000)
+      if (process.env.ZAI_TEST_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.ZAI_TEST_SCREENSHOT_DIR}/${provider}-settings-${bounds.width}.png` })
+      await settings.getByRole('button', { name: 'Permisos', exact: true }).click()
+      await expect(settings.locator('.permission-settings')).toBeVisible()
+      await settings.getByRole('button', { name: 'Uso', exact: true }).click()
+      await expect(settings.getByText('Uso de la cuenta', { exact: true })).toBeVisible()
+      await settings.getByRole('button', { name: `Cerrar configuración de ${title}`, exact: true }).click()
+      await page.locator('.save-status.saved').waitFor()
+    }
+  })
+}
+
 for (const provider of ['codex', 'claude'] as Provider[]) {
   const title = provider === 'codex' ? 'Codex' : 'Claude'
   test(`${title}: las opciones se envían al agente y el historial conserva su secuencia`, async ({ page }) => {
@@ -44,7 +85,7 @@ for (const provider of ['codex', 'claude'] as Provider[]) {
     await chooseOption(page, `Modelo de ${title}`, `${provider}-balanced`)
     await chooseOption(page, `Esfuerzo de ${title}`, 'high')
     await chooseOption(page, `Velocidad de ${title}`, provider === 'codex' ? 'priority' : 'fast')
-    await panel.getByRole('button', { name: `Cerrar configuración de ${title}`, exact: true }).click()
+    await page.getByRole('button', { name: `Cerrar configuración de ${title}`, exact: true }).click()
     await page.getByRole('button', { name: 'Vincular carpeta', exact: true }).click()
     await panel.getByLabel(`Mensaje para ${title}`).fill('Revisar')
     await panel.getByRole('button', { name: `Enviar a ${title}`, exact: true }).click()
@@ -61,11 +102,11 @@ for (const provider of ['codex', 'claude'] as Provider[]) {
     await page.reload()
     expect(await panel.locator('[data-chat-item]').evaluateAll((items) => items.map((item) => item.getAttribute('data-chat-item')))).toEqual(['user', 'assistant', 'tool', 'assistant'])
     await panel.getByRole('button', { name: `Configurar modelo de ${title}`, exact: true }).click()
-    await expect(panel.getByLabel(`Esfuerzo de ${title}`, { exact: true })).toHaveAttribute('data-value', 'high')
+    await expect(page.getByLabel(`Esfuerzo de ${title}`, { exact: true })).toHaveAttribute('data-value', 'high')
     await chooseOption(page, `Modelo de ${title}`, `${provider}-basic`)
-    await expect(panel.getByLabel(`Esfuerzo de ${title}`, { exact: true })).toBeDisabled()
-    await expect(panel.getByLabel(`Velocidad de ${title}`, { exact: true })).toHaveAttribute('data-value', 'default')
-    await expect(panel.getByLabel(`Velocidad de ${title}`, { exact: true })).toBeDisabled()
+    await expect(page.getByLabel(`Esfuerzo de ${title}`, { exact: true })).toBeDisabled()
+    await expect(page.getByLabel(`Velocidad de ${title}`, { exact: true })).toHaveAttribute('data-value', 'default')
+    await expect(page.getByLabel(`Velocidad de ${title}`, { exact: true })).toBeDisabled()
   })
 }
 
