@@ -1,4 +1,4 @@
-export type Provider = 'codex' | 'claude'
+export type Provider = 'codex' | 'claude' | 'zai'
 export type PanelKind = Provider | 'browser' | 'note' | 'terminal'
 export type AgentStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'error' | 'stopped'
 export interface Message { id: string; role: 'user' | 'assistant'; text: string; time: number }
@@ -9,6 +9,7 @@ export interface Approval { requestId: string; title: string; detail: string; ki
 export interface AgentPermissions {
   codexSandbox: 'read-only' | 'workspace-write' | 'danger-full-access'; codexApproval: 'on-request' | 'untrusted' | 'never'
   codexNetwork: boolean; claudeMode: 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions'
+  zaiMode?: 'ask' | 'edit' | 'plan' | 'auto'
   browserAccess: 'read-only' | 'ask' | 'control'
 }
 export interface BrowserConnection { id: string; agentId: string; browserId: string; agentSide: 'left' | 'right'; browserSide: 'left' | 'right' }
@@ -18,6 +19,7 @@ export interface Panel {
   id: string; kind: PanelKind; title: string; x: number; y: number; width: number; height: number; z: number
   minimized: boolean; iconX: number; iconY: number; maximized?: boolean
   previousBounds?: { x: number; y: number; width: number; height: number }
+  connectionId?: string;
   url: string; note: string; messages: Message[]; timeline?: ChatItem[]; sessionId?: string; model: string; effort: string; speed: string; permissions: AgentPermissions
 }
 export interface Project { id: string; name: string; color: string; folder: string; panels: Panel[]; connections: BrowserConnection[]; pan: { x: number; y: number }; zoom: number }
@@ -25,7 +27,7 @@ export interface Activity { id: string; projectId: string; panelId?: string; tex
 export interface Workspace {
   version: 1; projects: Project[]; activeProjectId: string; theme: 'dark' | 'light'; accent: string
   sidebar: { x: number; y: number; collapsed: boolean }; dock: { x: number | null; y: number | null }
-  activities: Activity[]; grid: boolean
+  activities: Activity[]; grid: boolean; background?: CanvasBackground
 }
 export interface ConversationMetrics { inputTokens: number; outputTokens: number; costUsd?: number }
 export interface AgentConfiguration { model?: string; effort?: string | null; speed?: string; speedReason?: string }
@@ -56,13 +58,23 @@ export interface DesktopBridge {
   providers(): Promise<Record<Provider, ProviderInfo>>
   catalog(provider: Provider, refresh?: boolean): Promise<ProviderCatalog>
   onProvider(listener: (event: { provider: Provider; data: ProviderCatalog }) => void): () => void
+  disconnectBrowser(agentId: string, browserId: string): Promise<void>
+  graphics(): Promise<GraphicsInfo>
+  setGraphics(mode: 'auto' | 'off'): Promise<GraphicsInfo>
+  apiProfiles(): Promise<APIProfile[]>
+  saveAPIProfile(profile: APIProfileInput): Promise<APIProfile>
+  deleteAPIProfile(id: string): Promise<void>
+  apiCatalog(id: string, model?: string): Promise<ProviderCatalog>
+  importBackground(): Promise<string | null>
+  generateBackground(request: { profileId: string; model: string; prompt: string; workflow?: string }): Promise<string>
+  cancelBackground(): Promise<void>
   syncBrowserGraph(projects: BrowserGraphProject[]): Promise<void>
   registerBrowser(data: { id: string; projectId: string; guestId: number }): Promise<void>
   onBrowserNavigate(listener: (event: { browserId: string; url: string }) => void): () => void
   onBrowserActivity(listener: (event: BrowserActivity) => void): () => void
   external(url: string): Promise<void>; window(action: 'minimize' | 'maximize' | 'close'): Promise<void>
   finishClose(): Promise<void>; onClosing(listener: () => void): () => void
-  send(request: { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; model?: string; effort?: string; speed?: string; permissions?: AgentPermissions }): Promise<void>
+  send(request: { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; connectionId?: string; model?: string; effort?: string; speed?: string; permissions?: AgentPermissions }): Promise<void>
   stop(id: string): Promise<void>; closeAgent(id: string): Promise<void>
   respond(id: string, requestId: string, response: { allow: boolean; answers?: Record<string, unknown> }): Promise<void>
   onAgent(listener: (event: AgentEvent) => void): () => void
@@ -73,3 +85,12 @@ export interface DesktopBridge {
   onTerminalExit(listener: (event: { id: string; exitCode: number }) => void): () => void
 }
 declare global { interface Window { zai?: DesktopBridge } }
+
+export type APIKind = 'deepseek' | 'openrouter' | 'ollama-cloud' | 'ollama-local' | 'compatible' | 'image-api' | 'automatic1111' | 'comfyui'
+export interface APIProfile { id: string; name: string; kind: APIKind; baseUrl: string; model: string; hasKey: boolean; storage: 'encrypted' | 'session' | 'none' }
+export interface APIProfileInput { id?: string; name: string; kind: APIKind; baseUrl: string; model: string; apiKey?: string; clearKey?: boolean }
+export interface CanvasBackground { color: string; image?: string; opacity: number }
+
+export interface GraphicsInfo { mode: 'auto' | 'off'; enabled: boolean; hardware: boolean; renderer: string; reason?: string; features: Record<string, string>; requiresRestart: boolean }
+
+export type BackgroundChange = (value: CanvasBackground | undefined | ((current?: CanvasBackground) => CanvasBackground | undefined)) => void

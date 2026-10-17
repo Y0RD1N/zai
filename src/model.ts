@@ -2,7 +2,7 @@ import type { Activity, Panel, PanelKind, Project, Workspace } from './types'
 import { defaultPermissions, restorePermissions } from './permissions'
 
 export const uid = () => crypto.randomUUID()
-export const names: Record<PanelKind, string> = { codex: 'Codex', claude: 'Claude', browser: 'Navegador', note: 'Notas de la idea', terminal: 'Terminal' }
+export const names: Record<PanelKind, string> = { codex: 'Codex', claude: 'Claude', zai: 'Zai Agent', browser: 'Navegador', note: 'Notas de la idea', terminal: 'Terminal' }
 export const colors = ['#ed987c', '#a2b797', '#a6a2cd', '#e3bc75', '#8eb6c5']
 export const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n))
 export function makePanel(kind: PanelKind, index = 0): Panel {
@@ -50,14 +50,15 @@ export function hydrate(value: unknown): Workspace | null {
       }))
       const pairs = new Set<string>()
       project.connections = (Array.isArray(project.connections) ? project.connections : []).filter((edge) => {
-        if (!edge || typeof edge.id !== 'string' || !project.panels.some((p) => p.id === edge.agentId && ['codex', 'claude'].includes(p.kind)) || !project.panels.some((p) => p.id === edge.browserId && p.kind === 'browser')) return false
+        if (!edge || typeof edge.id !== 'string' || !project.panels.some((p) => p.id === edge.agentId && ['codex', 'claude', 'zai'].includes(p.kind)) || !project.panels.some((p) => p.id === edge.browserId && p.kind === 'browser')) return false
         const key = `${edge.agentId}:${edge.browserId}`
         if (pairs.has(key)) return false
         pairs.add(key); return true
       }).map((edge) => ({ ...edge, agentSide: edge.agentSide === 'left' ? 'left' : 'right', browserSide: edge.browserSide === 'right' ? 'right' : 'left' }))
     }
     if (!data.projects.some((p) => p.id === data.activeProjectId)) data.activeProjectId = data.projects[0].id
-    return { ...initialWorkspace(), ...data, theme: data.theme === 'light' ? 'light' : 'dark', accent: colors.includes(data.accent) ? data.accent : colors[0],
+    const background = data.background && /^#[a-f\d]{6}$/i.test(data.background.color) ? { color: data.background.color, opacity: clamp(Number(data.background.opacity) || 0, 0, 1), image: typeof data.background.image === 'string' && /^[a-f\d-]{36}$/i.test(data.background.image) ? data.background.image : undefined } : undefined
+    return { ...initialWorkspace(), ...data, background, theme: data.theme === 'light' ? 'light' : 'dark', accent: colors.includes(data.accent) ? data.accent : colors[0],
       activities: Array.isArray(data.activities) ? data.activities.slice(0, 150) : [], sidebar: data.sidebar || { x: 22, y: 28, collapsed: false }, dock: data.dock || { x: null, y: null } }
   } catch { return null }
 }

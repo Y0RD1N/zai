@@ -6,7 +6,12 @@ export function PermissionsSettings({ panel, busy, patch }: { panel: Panel; busy
   const p = panel.permissions || defaultPermissions
   const change = (value: Partial<AgentPermissions>) => patch({ permissions: { ...p, ...value } })
   return <div className="permission-settings">
-    {panel.kind === 'codex' ? <>
+    {panel.kind === 'zai' ? <><div className="agent-field">Herramientas de Zai<AgentSelect label="Permisos de Zai Agent" value={p.zaiMode || 'ask'} disabled={busy} onChange={(value) => change({ zaiMode: value as AgentPermissions['zaiMode'] })} options={[
+      { value: 'ask', label: 'Preguntar antes de editar o ejecutar', description: 'Lecturas libres; cada escritura y comando requiere permiso.', badge: 'Habitual' },
+      { value: 'edit', label: 'Aceptar ediciones del proyecto', description: 'Escritura dentro del proyecto; los comandos piden permiso.' },
+      { value: 'plan', label: 'Planificar y leer', description: 'Impide escrituras, comandos y modificaciones del navegador.' },
+      { value: 'auto', label: 'Autónomo', description: 'Ediciones y comandos sin aprobación; se ejecutan con tus permisos.' },
+    ]} /></div><p className="provider-note">Las herramientas de archivos se limitan a la carpeta vinculada y comprueban enlaces simbólicos. Los comandos se ejecutan con los permisos de tu usuario: Zai no ofrece un sandbox del sistema para este motor.</p></> : panel.kind === 'codex' ? <>
       <div className="agent-field">Acceso a archivos<AgentSelect label="Acceso a archivos de Codex" disabled={busy} value={p.codexSandbox} onChange={(value) => change({ codexSandbox: value as AgentPermissions['codexSandbox'] })} options={[
         { value: 'read-only', label: 'Solo lectura', description: 'Inspeccionar archivos sin permitir su escritura.' },
         { value: 'workspace-write', label: 'Escritura en el proyecto', description: 'Editar dentro de la carpeta de este proyecto.', badge: 'Habitual' },

@@ -93,7 +93,7 @@ export function AgentControls({ panel, catalog, loading, runtime, busy, open, se
         <small>{resetLabel(window.resetsAt)}{window.status === 'rejected' ? ' · Límite alcanzado' : ''}</small>
       </div>)}
       {catalog?.usage.note && <p className="provider-note">{catalog.usage.note}</p>}
-      {runtime.metrics && <div className="conversation-usage"><span>Esta conversación</span><strong>{(runtime.metrics.inputTokens + runtime.metrics.outputTokens).toLocaleString('es')} tokens</strong>{typeof runtime.metrics.costUsd === 'number' && <small>Coste estimado: {runtime.metrics.costUsd.toLocaleString('es', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 })}</small>}</div>}
+      {runtime.metrics && <div className="conversation-usage"><span>Esta conversación</span><strong>{(runtime.metrics.inputTokens + runtime.metrics.outputTokens).toLocaleString('es')} tokens</strong>{typeof runtime.metrics.costUsd === 'number' && <small>{panel.kind === 'zai' ? 'Coste informado' : 'Coste estimado'}: {runtime.metrics.costUsd.toLocaleString('es', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 })}</small>}</div>}
       {catalog && <p className="usage-updated">Consultado {new Date(catalog.usage.updatedAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })} · actualización automática</p>}</>}
     </div>}
   </>

@@ -1,5 +1,5 @@
 import { createElement, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUpRight, Braces, ExternalLink, Globe2, LoaderCircle, LockKeyhole, RotateCw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpRight, Braces, ExternalLink, Globe2, Link2, Unplug, LoaderCircle, LockKeyhole, RotateCw } from 'lucide-react'
 import { normalizeUrl } from '../model'
 import type { BrowserActivity, Panel } from '../types'
 
@@ -7,8 +7,8 @@ interface Guest extends HTMLElement {
   loadURL(url: string): Promise<void>; getURL(): string; goBack(): void; goForward(): void; reload(): void
   getWebContentsId(): number; canGoBack(): boolean; canGoForward(): boolean; openDevTools(): void
 }
-export function BrowserPanel({ panel, projectId, patch, toast, onActivity, focus, connectedAgents, activity }: {
-  panel: Panel; projectId: string; connectedAgents: string[]; activity?: BrowserActivity; patch: (patch: Partial<Panel>) => void; toast: (text: string) => void
+export function BrowserPanel({ panel, projectId, patch, toast, onActivity, focus, connectedAgents, activity, disconnect }: {
+  panel: Panel; projectId: string; connectedAgents: { id: string; name: string }[]; disconnect: (id: string) => void; activity?: BrowserActivity; patch: (patch: Partial<Panel>) => void; toast: (text: string) => void
   onActivity: (text: string) => void; focus: () => void
 }) {
   const [address, setAddress] = useState(panel.url)
@@ -65,6 +65,6 @@ export function BrowserPanel({ panel, projectId, patch, toast, onActivity, focus
       {error && <div className="browser-error"><Globe2 size={28} /><h3>No pudimos abrir esta página</h3><p>{error}</p><button className="secondary-button" onClick={refresh}>Volver a intentar</button></div>}
       {loading && <div className="browser-loading" />}
     </div>
-    <div className="browser-footer"><i />{loading ? 'Cargando página…' : activity ? `${activity.action} · ${activity.phase === 'started' ? 'En curso' : activity.phase === 'completed' ? 'Completado' : 'Error'}` : connectedAgents.length ? `Conectado con ${connectedAgents.join(' y ')}` : 'Arrastra un punto para conectar un agente'}<span>{window.zai ? 'Chromium' : 'Vista previa web'}</span></div>
+    <div className="browser-footer"><i />{loading ? 'Cargando página…' : activity ? `${activity.action} · ${activity.phase === 'started' ? 'En curso' : activity.phase === 'completed' ? 'Completado' : 'Error'}` : connectedAgents.length ? `Conectado con ${connectedAgents.map((a) => a.name).join(' y ')}` : 'Arrastra un punto para conectar un agente'}{connectedAgents.length > 0 && <details className="browser-connections"><summary aria-label="Gestionar conexiones del navegador" title="Gestionar conexiones"><Link2 size={13} />{connectedAgents.length}</summary><div><strong>Agentes conectados</strong>{connectedAgents.map((agent) => <button key={agent.id} disabled={activity?.phase === 'started'} aria-label={`Desconectar ${agent.name} del navegador`} onClick={() => disconnect(agent.id)}><span>{agent.name}</span><Unplug size={13} /></button>)}<small>{activity?.phase === 'started' ? 'Espera a que termine la acción del navegador.' : 'Puedes desconectar cuando el navegador esté libre.'}</small></div></details>}<span>{window.zai ? 'Chromium' : 'Vista previa web'}</span></div>
   </div>
 }

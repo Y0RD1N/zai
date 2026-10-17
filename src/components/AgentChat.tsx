@@ -1,15 +1,23 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, Copy, Folder, LoaderCircle, ShieldCheck, Square, X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentRuntime, Approval, Panel, Project, ProviderCatalog, Tool } from '../types'
+import type { AgentRuntime, Approval, Panel, Project, ProviderCatalog, Tool, Message, PanelKind } from '../types'
 import { ProviderMark } from './Brand'
 import { AgentControls, usageSummary } from './AgentControls'
 
-function ToolCard({ tool }: { tool: Tool }) {
+const ToolCard = memo(function ToolCard({ tool }: { tool: Tool }) {
   return <details className={`tool-card tool-${tool.status}`}><summary title={tool.status === 'stopped' ? 'Interrumpida' : undefined}>{tool.status === 'running' ? <LoaderCircle className="spin" size={13} /> : ['failed', 'declined'].includes(tool.status) ? <X size={13} /> : tool.status === 'stopped' ? <Square size={12} /> : <Check size={13} />}<span>{tool.name || 'Herramienta'}</span><code>{tool.detail?.split('\n')[0]?.slice(0, 65)}</code><ChevronDown size={12} /></summary>
-    {tool.detail && <pre>{tool.detail}</pre>}{tool.output && <pre className="tool-output">{tool.output}</pre>}</details>
-}
+    {tool.name === 'update_plan' && tool.status === 'completed' && (() => { try { const steps = JSON.parse(tool.output || '[]') as { text: string; status: string }[]; return <ol className="agent-plan">{steps.map((step, index) => <li key={index} className={`plan-${step.status}`}>{step.status === 'completed' ? <Check size={12} /> : <span className="plan-dot" />}{step.text}</li>)}</ol> } catch { return null } })()}{tool.detail && <pre>{tool.detail}</pre>}{tool.output && <pre className="tool-output">{tool.output}</pre>}</details>
+})
+const MessageView = memo(function MessageView({ message, kind, title, toast }: { message: Message; kind: PanelKind; title: string; toast: (text: string) => void }) {
+  const [copied, setCopied] = useState(false)
+  return <article data-chat-item={message.role} className={`message message-${message.role}`}>
+    <div className="message-author">{message.role === 'assistant' ? <ProviderMark kind={kind} size={17} /> : <span className="user-dot">T</span>}<span>{message.role === 'assistant' ? title : 'Tú'}</span><time>{new Date(message.time).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>
+    <div className="markdown"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ href, children }) => <a href={href} onClick={(e) => { e.preventDefault(); if (href && /^https?:\/\//.test(href)) window.zai ? void window.zai.external(href) : window.open(href, '_blank', 'noopener,noreferrer') }}>{children}</a> }}>{message.text}</Markdown></div>
+    {message.role === 'assistant' && <button className="copy-message icon-button" aria-label="Copiar respuesta" onClick={async () => { try { await navigator.clipboard.writeText(message.text); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch { toast('No se pudo acceder al portapapeles.') } }}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
+  </article>
+})
 function Permission({ approval, panelId, toast }: { approval: Approval; panelId: string; toast: (text: string) => void }) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [sending, setSending] = useState(false)
@@ -41,7 +49,6 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
   const [draft, setDraft] = useState('')
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [optionsSection, setOptionsSection] = useState<'model' | 'usage' | 'permissions'>('model')
-  const [copied, setCopied] = useState('')
   const scroll = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const stickToBottom = useRef(true)
@@ -62,19 +69,15 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
     <div className="chat-scroll" ref={scroll} onScroll={() => { const el = scroll.current; if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90 }}>
       {!timeline.length ? <div className="agent-welcome">
         <span className={`welcome-brand brand-${panel.kind}`}><ProviderMark kind={panel.kind} size={36} /></span>
-        <span className="tiny-label">{isCodex ? 'DE LA IDEA AL CÓDIGO' : 'OTRA FORMA DE VERLO'}</span>
-        <h2>{isCodex ? '¿Qué construimos hoy?' : 'Las grandes ideas\nempiezan conversando.'}</h2>
-        <p>{isCodex ? 'Explora, crea y resuelve. Tu agente ya tiene un lugar en la pizarra.' : 'Un segundo punto de vista para darle forma a lo que tienes en mente.'}</p>
+        <span className="tiny-label">{panel.kind === 'zai' ? 'TU MODELO. TU ESPACIO.' : isCodex ? 'DE LA IDEA AL CÓDIGO' : 'OTRA FORMA DE VERLO'}</span>
+        <h2>{panel.kind === 'zai' ? 'Una idea.\nTodas las posibilidades.' : isCodex ? '¿Qué construimos hoy?' : 'Las grandes ideas\nempiezan conversando.'}</h2>
+        <p>{panel.kind === 'zai' ? 'Conecta tu modelo favorito. Explora tu proyecto y dale vida a lo que imaginas.' : isCodex ? 'Explora, crea y resuelve. Tu agente ya tiene un lugar en la pizarra.' : 'Un segundo punto de vista para darle forma a lo que tienes en mente.'}</p>
         <div className="suggestion-row">{(isCodex ? [['Explorar proyecto', 'Explora este proyecto y explícame su estructura.'], ['Crear algo nuevo', 'Ayúdame a planificar una nueva funcionalidad para este proyecto.']] : [['Revisar código', 'Revisa el código del proyecto e identifica los problemas más importantes.'], ['Pensar una idea', 'Ayúdame a pensar ideas para mejorar este proyecto.']]).map(([label, text]) => <button key={label} onClick={() => { setDraft(text); input.current?.focus() }}>{label}<ArrowUpRight size={12} /></button>)}</div>
       </div> : <div className="messages">{timeline.map((item) => {
         if (item.kind === 'tool') return <div className="timeline-tool" key={`tool:${item.tool.id}`} data-chat-item="tool" data-tool-id={item.tool.id}><ToolCard tool={item.tool} /></div>
         const message = messageById.get(item.id)
         if (!message) return null
-        return <article key={message.id} data-chat-item={message.role} className={`message message-${message.role}`}>
-        <div className="message-author">{message.role === 'assistant' ? <ProviderMark kind={panel.kind} size={17} /> : <span className="user-dot">T</span>}<span>{message.role === 'assistant' ? panel.title : 'Tú'}</span><time>{new Date(message.time).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>
-        <div className="markdown"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ href, children }) => <a href={href} onClick={(e) => { e.preventDefault(); if (href && /^https?:\/\//.test(href)) window.zai ? void window.zai.external(href) : window.open(href, '_blank', 'noopener,noreferrer') }}>{children}</a> }}>{message.text}</Markdown></div>
-        {message.role === 'assistant' && <button className="copy-message icon-button" aria-label="Copiar respuesta" onClick={async () => { try { await navigator.clipboard.writeText(message.text); setCopied(message.id); setTimeout(() => setCopied(''), 1800) } catch { toast('No se pudo acceder al portapapeles.') } }}>{copied === message.id ? <Check size={13} /> : <Copy size={13} />}</button>}
-      </article>
+        return <MessageView key={message.id} message={message} kind={panel.kind} title={panel.title} toast={toast} />
       })}</div>}
       {runtime.approvals.map((approval) => <Permission key={approval.requestId} panelId={panel.id} approval={approval} toast={toast} />)}
       {runtime.error && <div className="chat-error"><span>La conexión necesita atención</span><p>{runtime.error}</p></div>}

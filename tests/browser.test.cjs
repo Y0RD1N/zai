@@ -95,3 +95,17 @@ test('MCP exige un token activo y rechaza llamadas desde páginas web', async (t
   hub.closeAgent('codex')
   assert.equal((await request(config.headers)).status, 403)
 })
+
+test('desconectar se bloquea durante acciones activas o en cola y se permite inmediatamente al terminar', async (t) => {
+  let release
+  const pending = new Promise((resolve) => { release = resolve })
+  const { hub } = setup(t, { perform: async () => { await pending; return { content: [] } } })
+  await hub.configureAgent('codex', 'codex', { browserAccess: 'control' }); hub.setActive('codex', true)
+  const first = hub.execute('codex', 'zai_browser_snapshot', { browserId: 'browser' })
+  const second = hub.execute('codex', 'zai_browser_screenshot', { browserId: 'browser' })
+  assert.throws(() => hub.disconnect('codex', 'browser'), /trabajando/)
+  assert.throws(() => hub.sync([{ ...projects[0], connections: [] }, projects[1]]), /trabajando/)
+  release(); await Promise.all([first, second])
+  hub.disconnect('codex', 'browser')
+  await assert.rejects(hub.execute('codex', 'zai_browser_snapshot', { browserId: 'browser' }), /no está conectado/)
+})

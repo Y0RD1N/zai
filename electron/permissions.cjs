@@ -1,5 +1,5 @@
-const defaults = Object.freeze({ codexSandbox: 'workspace-write', codexApproval: 'on-request', codexNetwork: false, claudeMode: 'default', browserAccess: 'ask' })
-const choices = { codexSandbox: ['read-only', 'workspace-write', 'danger-full-access'], codexApproval: ['on-request', 'untrusted', 'never'],
+const defaults = Object.freeze({ codexSandbox: 'workspace-write', codexApproval: 'on-request', codexNetwork: false, claudeMode: 'default', browserAccess: 'ask', zaiMode: 'ask' })
+const choices = { zaiMode: ['ask', 'edit', 'plan', 'auto'], codexSandbox: ['read-only', 'workspace-write', 'danger-full-access'], codexApproval: ['on-request', 'untrusted', 'never'],
   claudeMode: ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'], browserAccess: ['read-only', 'ask', 'control'] }
 function permissions(value) {
   if (value === undefined) return { ...defaults }
@@ -29,6 +29,7 @@ function codexTurnPermissions(value, cwd) {
 function browserPermission(provider, value, mutates) {
   if (!mutates) return 'allow'
   const p = permissions(value)
+  if (provider === 'zai' && p.zaiMode === 'plan') return 'deny'
   if (p.browserAccess === 'read-only' || provider === 'codex' && p.codexSandbox === 'read-only' || provider === 'claude' && p.claudeMode === 'plan') return 'deny'
   if (p.browserAccess === 'control') return 'allow'
   if (provider === 'codex' && p.codexApproval === 'never' || provider === 'claude' && p.claudeMode === 'dontAsk') return 'deny'

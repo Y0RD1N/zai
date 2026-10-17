@@ -18,7 +18,37 @@ export function Connections({ project, activity, change, toast }: { project: Pro
   const [selected, setSelected] = useState('')
   const svg = useRef<SVGSVGElement>(null)
   const cancelDrag = useRef<(() => void) | null>(null)
-  const panels = project.panels.filter((panel) => ['codex', 'claude', 'browser'].includes(panel.kind))
+  const previews = useRef(new Map<string, Partial<Panel>>())
+  const latest = useRef(project)
+  latest.current = project
+  useEffect(() => {
+    const preview = (event: Event) => {
+      const { id, patch, end } = (event as CustomEvent<{ id: string; patch: Partial<Panel>; end?: boolean }>).detail
+      if (end) previews.current.delete(id); else previews.current.set(id, patch)
+      const current = latest.current
+      const target = current.panels.find((p) => p.id === id)
+      if (!target) return
+      const panels = current.panels.map((p) => p.id === id ? { ...p, ...patch } : p)
+      for (const side of ['left', 'right'] as Side[]) {
+        const port = document.querySelector<HTMLElement>(`[data-connection-panel="${CSS.escape(id)}"][data-connection-side="${side}"]`)
+        const point = anchor({ ...target, ...patch }, side)
+        if (port) { port.style.left = `${point.x - 12}px`; port.style.top = `${point.y - 12}px` }
+      }
+      for (const edge of current.connections.filter((e) => e.agentId === id || e.browserId === id)) {
+        const agent = panels.find((p) => p.id === edge.agentId), browser = panels.find((p) => p.id === edge.browserId)
+        if (!agent || !browser) continue
+        const a = anchor(agent, edge.agentSide), b = anchor(browser, edge.browserSide), d = curve(a, b, edge.agentSide, edge.browserSide)
+        const group = svg.current?.querySelector(`[data-edge-id="${CSS.escape(edge.id)}"]`)
+        group?.querySelectorAll('path').forEach((path) => path.setAttribute('d', d))
+        group?.querySelectorAll('animateMotion').forEach((animation) => animation.setAttribute('path', group.classList.contains('wire-completed') ? curve(b, a, edge.browserSide, edge.agentSide) : d))
+        const button = document.querySelector<HTMLElement>(`[data-remove-edge="${CSS.escape(edge.id)}"]`)
+        if (button) { button.style.left = `${(a.x + b.x) / 2}px`; button.style.top = `${(a.y + b.y) / 2}px` }
+      }
+    }
+    window.addEventListener('zai-panel-preview', preview)
+    return () => window.removeEventListener('zai-panel-preview', preview)
+  }, [])
+  const panels = project.panels.map((p) => previews.current.has(p.id) ? { ...p, ...previews.current.get(p.id) } : p).filter((panel) => ['codex', 'claude', 'zai', 'browser'].includes(panel.kind))
   useEffect(() => {
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { cancelDrag.current?.(); setArmed(null); setPointer(null); setSelected('') } }
     window.addEventListener('keydown', escape)
@@ -27,7 +57,7 @@ export function Connections({ project, activity, change, toast }: { project: Pro
   const connect = (a: Port, b: Port) => {
     const first = panels.find((panel) => panel.id === a.id), second = panels.find((panel) => panel.id === b.id)
     if (!first || !second || first.id === second.id) return
-    if ((first.kind === 'browser') === (second.kind === 'browser')) { toast('Une un navegador con Codex o Claude del mismo proyecto.'); return }
+    if ((first.kind === 'browser') === (second.kind === 'browser')) { toast('Une un navegador con un agente del mismo proyecto.'); return }
     const agent = first.kind === 'browser' ? second : first, browser = first.kind === 'browser' ? first : second
     if (project.connections.some((edge) => edge.agentId === agent.id && edge.browserId === browser.id)) { toast('Estas ventanas ya están conectadas.'); setArmed(null); return }
     change([...project.connections, { id: uid(), agentId: agent.id, browserId: browser.id, agentSide: first.id === agent.id ? a.side : b.side, browserSide: first.id === browser.id ? a.side : b.side }])
@@ -52,7 +82,7 @@ export function Connections({ project, activity, change, toast }: { project: Pro
       if (!moved) return
       const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-connection-panel]')
       if (target?.dataset.connectionPanel && target.dataset.connectionSide) connect(port, { id: target.dataset.connectionPanel, side: target.dataset.connectionSide as Side })
-      else { setArmed(null); toast('Suelta el hilo en un punto de Codex, Claude o del navegador.') }
+      else { setArmed(null); toast('Suelta el hilo en un punto de un agente o del navegador.') }
     }
     const startX = event.clientX, startY = event.clientY
     cancelDrag.current?.(); cancelDrag.current = cancel
@@ -66,7 +96,7 @@ export function Connections({ project, activity, change, toast }: { project: Pro
         if (!agent || !browser) return null
         const a = anchor(agent, edge.agentSide), b = anchor(browser, edge.browserSide), d = curve(a, b, edge.agentSide, edge.browserSide)
         const event = activity[`${agent.id}:${browser.id}`]
-        return <g key={edge.id} className={`connection-wire brand-${agent.kind} ${selected === edge.id ? 'selected' : ''} ${event ? `wire-${event.phase}` : ''}`} data-testid="browser-connection" data-agent-id={agent.id} data-browser-id={browser.id}>
+        return <g key={edge.id} className={`connection-wire brand-${agent.kind} ${selected === edge.id ? 'selected' : ''} ${event ? `wire-${event.phase}` : ''}`} data-edge-id={edge.id} data-testid="browser-connection" data-agent-id={agent.id} data-browser-id={browser.id}>
           <path className="connection-shadow" d={d} /><path className="connection-stroke" d={d} />
           <path className="connection-hit connection-control" d={d} role="button" tabIndex={0} aria-label={`Conexión ${agent.title} con ${browser.title}`} onClick={() => setSelected(selected === edge.id ? '' : edge.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(edge.id) } if (e.key === 'Delete' || e.key === 'Backspace') change(project.connections.filter((item) => item.id !== edge.id)) }}><title>{event ? `${event.action} · ${event.phase === 'started' ? 'En curso' : event.phase === 'completed' ? 'Respuesta recibida' : 'Error'}` : `${agent.title} conectado con ${browser.title}`}</title></path>
           {event && event.phase !== 'error' && <g key={event.operationId + event.phase} className="connection-pulses" aria-label={event.phase === 'started' ? 'Acción enviada al navegador' : 'Respuesta del navegador'}>{[0, .28].map((delay) => <circle key={delay} r="3" className="connection-pulse"><animateMotion dur="1s" begin={`${delay}s`} repeatCount={event.phase === 'started' ? 'indefinite' : '1'} fill="remove" path={event.phase === 'completed' ? curve(b, a, edge.browserSide, edge.agentSide) : d} /><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.05;.9;1" dur="1s" begin={`${delay}s`} repeatCount={event.phase === 'started' ? 'indefinite' : '1'} fill="remove" /></circle>)}</g>}
@@ -83,7 +113,7 @@ export function Connections({ project, activity, change, toast }: { project: Pro
       const agent = panels.find((panel) => panel.id === edge.agentId), browser = panels.find((panel) => panel.id === edge.browserId)
       if (!agent || !browser) return null
       const a = anchor(agent, edge.agentSide), b = anchor(browser, edge.browserSide)
-      return <button key={edge.id} className="connection-remove connection-control" style={{ left: (a.x + b.x) / 2, top: (a.y + b.y) / 2 }} aria-label={`Desconectar ${agent.title} de ${browser.title}`} onClick={() => { change(project.connections.filter((item) => item.id !== edge.id)); setSelected('') }}><Unplug size={13} />Desconectar</button>
+      return <button key={edge.id} data-remove-edge={edge.id} disabled={activity[`${edge.agentId}:${edge.browserId}`]?.phase === 'started'} title={activity[`${edge.agentId}:${edge.browserId}`]?.phase === 'started' ? 'El navegador está trabajando' : 'Desconectar navegador'} className="connection-remove connection-control" style={{ left: (a.x + b.x) / 2, top: (a.y + b.y) / 2 }} aria-label={`Desconectar ${agent.title} de ${browser.title}`} onClick={() => { change(project.connections.filter((item) => item.id !== edge.id)); setSelected('') }}><Unplug size={13} />Desconectar</button>
     })}
   </>
 }

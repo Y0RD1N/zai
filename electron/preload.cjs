@@ -5,6 +5,16 @@ const subscribe = (channel, listener) => {
   return () => ipcRenderer.removeListener(channel, handler)
 }
 contextBridge.exposeInMainWorld('zai', {
+  graphics: () => ipcRenderer.invoke('graphics:info'),
+  setGraphics: (mode) => ipcRenderer.invoke('graphics:mode', mode),
+  apiProfiles: () => ipcRenderer.invoke('api:profiles'),
+  saveAPIProfile: (profile) => ipcRenderer.invoke('api:save', profile),
+  deleteAPIProfile: (id) => ipcRenderer.invoke('api:delete', id),
+  apiCatalog: (id, model) => ipcRenderer.invoke('api:catalog', id, model),
+  importBackground: () => ipcRenderer.invoke('background:import'),
+  generateBackground: (request) => ipcRenderer.invoke('background:generate', request),
+  cancelBackground: () => ipcRenderer.invoke('background:cancel'),
+  disconnectBrowser: (agentId, browserId) => ipcRenderer.invoke('browser:disconnect', agentId, browserId),
   load: () => ipcRenderer.invoke('workspace:load'),
   save: (data) => ipcRenderer.invoke('workspace:save', data),
   chooseFolder: () => ipcRenderer.invoke('project:choose'),

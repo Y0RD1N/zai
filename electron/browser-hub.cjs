@@ -4,7 +4,7 @@ const { tools, actionNames, validateTool, textResult } = require('./browser-tool
 const { permissions, browserPermission } = require('./permissions.cjs')
 
 function createBrowserHub({ perform, describe, emit, agentEvent }) {
-  const panels = new Map(), edges = new Map(), agents = new Map(), tokens = new Map(), approvals = new Map(), queues = new Map()
+  const panels = new Map(), edges = new Map(), agents = new Map(), tokens = new Map(), approvals = new Map(), queues = new Map(), busy = new Map()
   let server, listening, disposed = false
   const connected = (agentId, browserId) => {
     const agent = panels.get(agentId), browser = panels.get(browserId)
@@ -41,6 +41,8 @@ function createBrowserHub({ perform, describe, emit, agentEvent }) {
       if (agent.active) agentEvent({ id: agentId, type: 'status', status: 'running' })
       if (!allowed) throw new Error('El usuario rechazó la acción del navegador.')
     }
+    if (signal?.aborted || !agent.active || !connected(agentId, browserId)) throw new Error('Conexión cancelada o desconectada.')
+    busy.set(browserId, (busy.get(browserId) || 0) + 1)
     const previous = queues.get(browserId) || Promise.resolve()
     const task = previous.catch(() => {}).then(async () => {
       if (signal?.aborted || !agent.active || !connected(agentId, browserId)) throw new Error('Conexión cancelada o desconectada.')
@@ -55,7 +57,7 @@ function createBrowserHub({ perform, describe, emit, agentEvent }) {
       } catch (error) { emit({ ...activity, time: Date.now(), phase: 'error', error: error.message }); throw error }
     })
     queues.set(browserId, task)
-    try { return await task } finally { if (queues.get(browserId) === task) queues.delete(browserId) }
+    try { return await task } finally { busy.set(browserId, Math.max(0, (busy.get(browserId) || 1) - 1)); if (queues.get(browserId) === task) queues.delete(browserId) }
   }
   const startServer = () => {
     if (listening) return listening
@@ -104,13 +106,14 @@ function createBrowserHub({ perform, describe, emit, agentEvent }) {
       const nextPanels = new Map(), nextEdges = new Map()
       for (const project of projects) {
         if (typeof project.id !== 'string' || !Array.isArray(project.panels) || !Array.isArray(project.connections)) throw new Error('Proyecto de conexiones inválido.')
-        for (const panel of project.panels) if (typeof panel.id === 'string' && ['codex', 'claude', 'browser'].includes(panel.kind)) nextPanels.set(panel.id, { ...panel, projectId: project.id })
+        for (const panel of project.panels) if (typeof panel.id === 'string' && ['codex', 'claude', 'zai', 'browser'].includes(panel.kind)) nextPanels.set(panel.id, { ...panel, projectId: project.id })
       }
       for (const project of projects) for (const edge of project.connections) {
         const agent = nextPanels.get(edge.agentId), browser = nextPanels.get(edge.browserId)
-        if (typeof edge.id !== 'string' || !agent || !['codex', 'claude'].includes(agent.kind) || browser?.kind !== 'browser' || agent.projectId !== project.id || browser.projectId !== project.id) throw new Error('Solo puedes conectar agentes y navegadores del mismo proyecto.')
+        if (typeof edge.id !== 'string' || !agent || !['codex', 'claude', 'zai'].includes(agent.kind) || browser?.kind !== 'browser' || agent.projectId !== project.id || browser.projectId !== project.id) throw new Error('Solo puedes conectar agentes y navegadores del mismo proyecto.')
         nextEdges.set(edge.id, { id: edge.id, agentId: edge.agentId, browserId: edge.browserId })
       }
+      for (const edge of edges.values()) if (nextPanels.has(edge.agentId) && nextPanels.has(edge.browserId) && ![...nextEdges.values()].some((next) => next.agentId === edge.agentId && next.browserId === edge.browserId) && busy.get(edge.browserId)) throw new Error('El navegador está trabajando. Espera a que termine su acción antes de desconectarlo.')
       panels.clear(); for (const [id, value] of nextPanels) panels.set(id, value)
       edges.clear(); for (const [id, value] of nextEdges) edges.set(id, value)
       for (const [id, approval] of approvals) if (!connected(approval.agentId, approval.browserId)) resolveApproval(id, false)
@@ -130,6 +133,11 @@ function createBrowserHub({ perform, describe, emit, agentEvent }) {
     },
     respond(requestId, response, agentId) { if (approvals.get(requestId)?.agentId !== agentId) return false; return resolveApproval(requestId, response?.allow === true) },
     closeAgent(id) { this.setActive(id, false); const agent = agents.get(id); if (agent) tokens.delete(agent.token); agents.delete(id) },
+    disconnect(agentId, browserId) {
+      if (busy.get(browserId)) throw new Error('El navegador está trabajando. Espera a que termine su acción antes de desconectarlo.')
+      for (const [id, edge] of edges) if (edge.agentId === agentId && edge.browserId === browserId) edges.delete(id)
+      for (const [id, pending] of approvals) if (pending.agentId === agentId && pending.browserId === browserId) resolveApproval(id, false)
+    },
     execute,
     dispose() { disposed = true; for (const id of agents.keys()) this.closeAgent(id); server?.closeAllConnections(); server?.close(); tokens.clear() },
   }

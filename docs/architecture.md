@@ -101,10 +101,19 @@ los componentes sin desmontarlos. Las sesiones siguen activas hasta cerrar su
 ventana o salir de la aplicación.
 
 La capa de ventanas usa `zoom` de CSS para dibujar texto y controles a la escala
-elegida, con desplazamiento mediante `left` y `top`. No se fuerza una capa de
+elegida, con desplazamiento mediante `left` y `top`. En reposo no se fuerza una capa de
 composición con `will-change: transform`: mantener una imagen de las ventanas y
 reescalarla suavizaba el texto al cambiar el zoom. Las coordenadas guardadas y los
 desplazamientos del ratón siguen expresándose en unidades de la pizarra.
+Durante un arrastre se agrupan eventos con `requestAnimationFrame`, se traslada
+solo el panel y se actualiza su SVG de conexiones directamente. React recibe los
+límites finales al soltar; entonces se retiran `transform` y `will-change`. Mover
+la pizarra aplica el mismo patrón a su mundo. Los mensajes Markdown se memorizan
+por referencia de mensaje para evitar procesar el historial al llegar cada delta.
+`graphics.json` configura el modo de aceleración antes de `app.ready`. El modo
+automático conserva la selección y protecciones del controlador de Chromium;
+la UI consulta `getGPUInfo`, `getGPUFeatureStatus` e `isHardwareAccelerationEnabled`.
+Un fallo al consultar la GPU se muestra como alternativa de software.
 
 Esta capa tiene su propio contexto de apilamiento, por
 encima del título del proyecto y por debajo de los controles de la pizarra. La
@@ -149,7 +158,10 @@ Cada llamada verifica que hay un turno activo y una conexión al navegador dentr
 del mismo proyecto. Las mutaciones respetan el acceso del navegador (leer,
 preguntar o controlar), además de los modos restrictivos del agente. La aprobación
 es para una sola operación y se cancela al desconectar o detener el turno. Las
-acciones se serializan por navegador. Quitar la conexión o cerrar el chat revoca
+acciones se serializan por navegador. El broker cuenta operaciones activas y en
+cola; tanto la sustitución del grafo como la desconexión explícita rechazan quitar
+una arista si su navegador está ocupado. La UI espera esa validación antes de
+guardar el nuevo grafo. Cerrar una ventana todavía cancela y revoca su agente. Quitar la conexión o cerrar el chat revoca
 su acceso; cerrar el chat también elimina su token.
 
 `electron/browser-controller.cjs` comprueba que cada webview pertenece a la ventana
@@ -181,3 +193,60 @@ su agente o terminal; salir termina los procesos que aún pertenecen a Zai.
 - [Fast mode de Claude Code](https://code.claude.com/docs/en/fast-mode)
 - [Referencia TypeScript del SDK](https://github.com/anthropics/claude-agent-sdk-typescript)
 - [Arquitectura de T3 Code](https://github.com/pingdotgg/t3code/blob/main/docs/internals/overview.md)
+
+
+## Motor original multiproveedor
+
+`zai-runtime.cjs` coordina el motor Node incluido en Electron. Mantiene el historial
+original de proveedor y emite los mismos eventos de chat que Codex y Claude.
+`api-client.cjs` implementa SSE para DeepSeek/OpenRouter/compatibles y NDJSON para
+Ollama. Conserva el razonamiento, las firmas y las llamadas completas antes de
+validar argumentos y ejecutar una herramienta. Usa límites de respuesta, rondas,
+resultados, tiempos y un AbortController por ejecución. No hay dependencia de Pi,
+OpenCode o T3 Code en este motor.
+
+`zai-tools.cjs` registra herramientas cerradas de lectura, listado, búsqueda,
+escritura, edición, comandos, planes y skills; el runtime añade preguntas y
+revisiones aisladas. Las rutas de archivos pasan por `realpath` y permanecen dentro
+del proyecto, con comprobación de enlaces. Los comandos requieren aprobación salvo
+modo Autónomo y se ejecutan sin sandbox del SO, con tiempo limitado y terminación
+del grupo de procesos. El modo Plan bloquea comandos y escrituras. Las revisiones
+hijas reciben solamente herramientas de lectura y no pueden delegar nuevamente.
+Las herramientas de navegador llaman directamente al mismo BrowserHub: no omiten
+su grafo, permisos, cola ni pulsos.
+
+Las sesiones se guardan atómicamente en `agent-sessions/<uuid>.json`, vinculadas a
+carpeta, perfil y origen. Una interrupción cierra llamadas pendientes con resultado
+de cancelación para no dejar historiales inválidos. La compacción resume un prefijo
+completo y conserva los turnos recientes; la pizarra conserva su historial visible.
+Cada edición guarda el contenido anterior en `<uuid>-backups/`. Actualmente estos
+respaldos no tienen interfaz de restauración. No se incluyen en las exportaciones.
+
+`api-profiles.cjs` conserva metadatos y secretos por separado del workspace. Nunca
+retorna una clave a la interfaz después de guardarla. Usa safeStorage del sistema;
+en Linux `basic_text`, almacén no disponible o bloqueado implica clave en memoria.
+Cambiar el endpoint o tipo elimina la credencial previa. Las peticiones usan HTTPS
+remoto (HTTP para loopback/LAN explícita), no permiten credenciales en URL ni siguen
+redirecciones con autenticación. Los procesos de herramientas no heredan variables
+con nombres de claves, tokens o secretos del proceso principal.
+
+`api-catalog.cjs` consulta modelos y capacidades; consulta saldo de DeepSeek,
+límite de clave OpenRouter o saldo/cuotas de Ollama Cloud cuando están disponibles.
+Las consultas se almacenan brevemente en caché; los datos ausentes no producen
+porcentajes inventados. El consumo por conversación procede del uso publicado en
+las respuestas. No se presupone que cualquier modelo admita herramientas o visión.
+Las capturas solo se reenvían como entrada visual a modelos que anuncian visión.
+
+## Biblioteca de fondos
+
+`backgrounds.cjs` importa o genera imágenes mediante adaptadores de OpenRouter,
+API Images compatible, A1111/Forge o ComfyUI. ComfyUI exige workflow API y sigue el
+prompt_id propio; cancelar no envía interrupción global a un motor compartido.
+No se instalan servidores ni modelos de generación local automáticamente.
+
+Las imágenes raster se validan, decodifican y normalizan a PNG de hasta 4096 px,
+con límites de bytes y dimensiones. Se sirven por `zai-asset://background/<uuid>`;
+el protocolo solo acepta identificadores de esa biblioteca. El workspace guarda
+el identificador, color e intensidad, sin rutas arbitrarias ni base64. La capa está
+bajo las ventanas y no aplica filtros o escalas al texto. Una copia JSON exportada
+no transporta la biblioteca de imágenes ni credenciales.
