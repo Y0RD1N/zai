@@ -13,7 +13,7 @@ export interface AgentPermissions {
 }
 export interface BrowserConnection { id: string; agentId: string; browserId: string; agentSide: 'left' | 'right'; browserSide: 'left' | 'right' }
 export interface BrowserActivity { agentId: string; browserId: string; operationId: string; action: string; phase: 'started' | 'completed' | 'error'; time: number; error?: string }
-export interface BrowserGraphProject { id: string; panels: { id: string; kind: PanelKind }[]; connections: BrowserConnection[] }
+export interface BrowserGraphProject { id: string; panels: { id: string; kind: PanelKind; visible?: boolean }[]; connections: BrowserConnection[] }
 export interface Panel {
   id: string; kind: PanelKind; title: string; x: number; y: number; width: number; height: number; z: number
   minimized: boolean; iconX: number; iconY: number; maximized?: boolean

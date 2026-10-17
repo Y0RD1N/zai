@@ -98,6 +98,7 @@ function createBrowserHub({ perform, describe, emit, agentEvent }) {
   }
   return {
     hasBrowser(id, projectId) { const panel = panels.get(id); return panel?.kind === 'browser' && (!projectId || panel.projectId === projectId) },
+    isBrowserVisible(id) { return panels.get(id)?.visible !== false },
     sync(projects) {
       if (!Array.isArray(projects) || projects.length > 200) throw new Error('Grafo de conexiones inválido.')
       const nextPanels = new Map(), nextEdges = new Map()

@@ -12,7 +12,7 @@ const tools = [
   spec('zai_browser_select', 'Select an option in a select element from the latest snapshot.', { browserId, ref, value: { type: 'string' } }, ['browserId', 'ref', 'value']),
   spec('zai_browser_press', 'Send a key to the connected browser (Enter, Tab, Escape, arrows, Backspace, Delete, Space, or Control+A).', { browserId, key: { type: 'string' } }, ['browserId', 'key']),
   spec('zai_browser_scroll', 'Scroll the connected page by a number of pixels.', { browserId, x: { type: 'number', minimum: -5000, maximum: 5000 }, y: { type: 'number', minimum: -5000, maximum: 5000 } }, ['browserId', 'y']),
-  spec('zai_browser_screenshot', 'Take a screenshot of the connected browser viewport, without accessing other apps or windows.', { browserId }, ['browserId'], true),
+  spec('zai_browser_screenshot', 'Take a screenshot of the connected browser viewport, without accessing other apps or windows. The browser must be restored and its project visible on the board; DOM snapshots still work while minimized.', { browserId }, ['browserId'], true),
 ]
 const actionNames = { list: 'Listar navegadores', snapshot: 'Leer página', navigate: 'Navegar', click: 'Pulsar elemento', fill: 'Escribir en campo', select: 'Seleccionar opción', press: 'Pulsar tecla', scroll: 'Desplazar página', screenshot: 'Capturar navegador' }
 function validateTool(name, args) {

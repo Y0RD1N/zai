@@ -42,7 +42,7 @@ const deadline = (promise, duration = 20_000) => {
   let timer
   return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('El navegador no respondió a tiempo.')), duration) })]).finally(() => clearTimeout(timer))
 }
-function createBrowserController({ webContents, session, host, hasBrowser, navigate }) {
+function createBrowserController({ webContents, session, host, hasBrowser, isBrowserVisible, navigate }) {
   const guests = new Map()
   const find = (id) => {
     const entry = guests.get(id), contents = entry && webContents.fromId(entry.guestId)
@@ -60,7 +60,7 @@ function createBrowserController({ webContents, session, host, hasBrowser, navig
       guests.set(id, { guestId, projectId })
       contents.once('destroyed', () => { if (guests.get(id)?.guestId === guestId) guests.delete(id) })
     },
-    describe(id) { const contents = find(id); return { title: contents?.getTitle() || 'Navegador', url: contents?.getURL() || '', ready: !!contents } },
+    describe(id) { const contents = find(id); return { title: contents?.getTitle() || 'Navegador', url: contents?.getURL() || '', ready: !!contents, visible: isBrowserVisible(id) } },
     async perform(id, action, args, signal) {
       let contents = find(id)
       if (action === 'navigate') {
@@ -80,8 +80,9 @@ function createBrowserController({ webContents, session, host, hasBrowser, navig
       if (!contents) throw new Error('El navegador está vacío. Usa zai_browser_navigate para abrir una página.')
       if (signal?.aborted) throw new Error('Acción cancelada.')
       if (action === 'screenshot') {
-        // Wake Chromium's compositor for this capture without changing the board's
-        // minimized state. Keeping the renderer hidden can leave readback pending.
+        // Hidden webviews can suspend their compositor, leaving image readback
+        // pending on some platforms. DOM tools remain available while minimized.
+        if (!isBrowserVisible(id)) throw new Error('Para tomar una captura, restaura el navegador y abre su proyecto en la pizarra. Puedes seguir leyendo la página mientras está minimizado.')
         const image = await deadline(contents.capturePage(undefined, { stayHidden: false, stayAwake: true }))
         if (image.isEmpty()) throw new Error('No se pudo capturar el navegador. Restaura la ventana e inténtalo otra vez.')
         const resized = image.getSize().width > 1400 ? image.resize({ width: 1400 }) : image

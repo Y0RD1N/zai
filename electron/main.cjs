@@ -27,7 +27,9 @@ const emit = (channel, payload) => {
 }
 const catalogs = createProviderCatalog((event) => emit('provider:update', event))
 const browserController = createBrowserController({ webContents, session, host: () => window?.webContents,
-  hasBrowser: (id, projectId) => browserHub.hasBrowser(id, projectId), navigate: (event) => emit('browser:navigate', event) })
+  hasBrowser: (id, projectId) => browserHub.hasBrowser(id, projectId),
+  isBrowserVisible: (id) => browserHub.isBrowserVisible(id) && !!window && !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
+  navigate: (event) => emit('browser:navigate', event) })
 const browserHub = createBrowserHub({ perform: (...args) => browserController.perform(...args), describe: (id) => browserController.describe(id),
   emit: (event) => emit('browser:activity', event), agentEvent: (event) => emit('agent:event', event) })
 const agents = createAgentManager((event) => {

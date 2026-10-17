@@ -79,6 +79,8 @@ enviar teclas, desplazarse y tomar capturas. El acceso del navegador se configur
 por separado en «Permisos»: solo lectura, preguntar por cada interacción o control.
 Los modos de solo lectura de Codex y Plan de Claude impiden modificar el navegador.
 Los pulsos del hilo corresponden a acciones reales, incluso al minimizar la ventana.
+La lectura sigue disponible al minimizar; para tomar capturas, restaura el navegador
+y mantén visible su proyecto en la pizarra.
 Para desconectar, selecciona el hilo y pulsa Supr/Backspace o su botón de desconexión.
 Desconectarlo revoca el acceso del agente a ese navegador.
 

@@ -49,7 +49,7 @@ export default function App() {
   const space = useRef(false)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const project = workspace.projects.find((p) => p.id === workspace.activeProjectId) || workspace.projects[0]
-  const browserGraph = JSON.stringify(workspace.projects.map((p) => ({ id: p.id, panels: p.panels.filter((panel) => ['codex', 'claude', 'browser'].includes(panel.kind)).map(({ id, kind }) => ({ id, kind })), connections: p.connections })))
+  const browserGraph = JSON.stringify(workspace.projects.map((p) => ({ id: p.id, panels: p.panels.filter((panel) => ['codex', 'claude', 'browser'].includes(panel.kind)).map(({ id, kind, minimized }) => ({ id, kind, visible: !minimized && p.id === workspace.activeProjectId })), connections: p.connections })))
   useEffect(() => {
     const dismiss = (event: globalThis.PointerEvent) => { if (!minimizedTray.current?.contains(event.target as Node)) minimizedTray.current?.removeAttribute('open') }
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') minimizedTray.current?.removeAttribute('open') }

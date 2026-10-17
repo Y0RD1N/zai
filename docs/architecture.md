@@ -154,7 +154,11 @@ Las referencias y las operaciones DOM residen en un mundo aislado de Chromium;
 los clics y teclas se envían a ese webview mediante el protocolo de depuración.
 No se ejecuta JavaScript arbitrario proporcionado por el modelo. La implementación
 actual opera sobre el documento principal; no incluye carga de archivos ni control
-del escritorio. Las páginas siguen sin recibir el puente de Zai ni acceso a Node.
+del escritorio. Las capturas requieren una ventana restaurada y su proyecto visible:
+los webviews ocultos pueden suspender su compositor según el sistema. Se informa
+esa condición de inmediato, sin cambiar ventanas automáticamente; las herramientas
+DOM siguen disponibles al minimizar. Las páginas siguen sin recibir el puente de
+Zai ni acceso a Node.
 
 Los procesos de agentes, las terminales y el almacenamiento pertenecen al proceso
 principal. El renderer solo recibe una API concreta en `electron/preload.cjs`.
