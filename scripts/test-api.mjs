@@ -34,7 +34,7 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); base = `
 try {
   application = await _electron.launch({ ...(process.env.ZAI_TEST_EXECUTABLE ? { executablePath: process.env.ZAI_TEST_EXECUTABLE } : {}), args: [...(process.env.ZAI_TEST_NO_SANDBOX ? ['--no-sandbox'] : []), ...(process.env.ZAI_TEST_EXECUTABLE ? [] : [root])], env: { ...process.env, ZAI_USER_DATA: data, ZAI_TEST: '1', ZAI_DEV_URL: '' } })
   const page = await application.firstWindow(); page.on('pageerror', (e) => errors.push(e.message))
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1600, 1000))
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1024, 720))
   await page.getByRole('heading', { name: '¿Qué construimos hoy?' }).waitFor()
   await expect.poll(async () => page.evaluate(() => window.zai.load())).not.toBeNull()
   await page.evaluate(async ({ folder, base }) => {
@@ -51,6 +51,9 @@ try {
   await page.reload()
   const panel = page.getByTestId('panel-zai'), input = page.getByLabel('Mensaje para Zai Agent', { exact: true })
   await expect(panel).toBeVisible()
+  // macOS constrains windows to its display. Fit the fixture to the actual canvas,
+  // so the floating dock cannot cover a fixed-coordinate browser footer.
+  await page.getByRole('button', { name: 'Encuadrar pizarra', exact: true }).click()
   await expect(page.getByLabel('Conexión de Zai Agent', { exact: true })).toContainText('Motor de prueba')
   await expect.poll(() => application.evaluate(({ webContents }) => webContents.getAllWebContents().find((v) => v.getType() === 'webview')?.getTitle())).toBe('Browser fixture')
   await input.fill('crea y revisa'); await input.press('Enter')
@@ -103,7 +106,7 @@ try {
   const pref = JSON.parse(await readFile(path.join(data, 'graphics.json'), 'utf8')); expect(pref.mode).toBe('off')
   await settings.getByLabel('Aceleración por hardware', { exact: true }).click()
   await settings.getByRole('button', { name: 'Cerrar diálogo', exact: true }).click()
-  await page.locator('.save-status.saved').waitFor()
+  await page.locator('.save-status.saved').waitFor({ state: 'attached' })
   const saved = await page.evaluate(() => window.zai.load())
   expect(JSON.stringify(saved).includes('not-a-real-key')).toBe(false); expect(saved.background.color).toBe('#253343')
   const publicProfiles = await page.evaluate(() => window.zai.apiProfiles())
