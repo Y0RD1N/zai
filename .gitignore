@@ -3,3 +3,12 @@
 !.env.example
 .DS_Store
 Thumbs.db
+node_modules/
+dist/
+release/
+test-results/
+playwright-report/
+*.log
+.vite/
+.test-data/
+*.tsbuildinfo
