@@ -3,8 +3,19 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { installers, releaseVersion, stage, verifyAssets } from '../scripts/release.mjs'
+import { findRelease, installers, releaseVersion, stage, verifyAssets } from '../scripts/release.mjs'
 const variants = [['Linux', 'x64'], ['Windows', 'x64'], ['macOS', 'x64'], ['macOS', 'arm64']]
+test('la publicación recupera borradores paginados y no oculta errores de GitHub', () => {
+  const draft = { id: 42, tag_name: 'v0.4.1', draft: true }
+  const invoke = (program, args) => {
+    assert.equal(program, 'gh')
+    assert.deepEqual(args, ['api', 'repos/Y0RD1N/zai/releases?per_page=100', '--paginate', '--slurp'])
+    return JSON.stringify([[{ tag_name: 'v0.4.2', draft: false }], [draft]])
+  }
+  assert.deepEqual(findRelease('v0.4.1', invoke), draft)
+  assert.equal(findRelease('v0.3.0', invoke), undefined)
+  assert.throws(() => findRelease('v0.4.1', () => { throw new Error('HTTP 403') }), /HTTP 403/)
+})
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'zai-release-test-'))
   t.after(() => rm(directory, { recursive: true, force: true }))

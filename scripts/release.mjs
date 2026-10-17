@@ -58,6 +58,12 @@ export async function verifyAssets(version, directory) {
   return [...variants.flatMap(([platform, arch]) => installers(version, platform, arch)), 'SHA256SUMS.txt'].map((name) => path.join(directory, name))
 }
 const run = (program, args) => execFileSync(program, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+export function findRelease(tag, invoke = run) {
+  // The tag endpoint omits drafts. The authenticated list includes them and pagination
+  // keeps retries safe even after many versions have been published.
+  const pages = JSON.parse(invoke('gh', ['api', `repos/${repository}/releases?per_page=100`, '--paginate', '--slurp']))
+  return pages.flat().find((release) => release.tag_name === tag)
+}
 async function main() {
   const [command, platform, arch] = process.argv.slice(2)
   const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -75,10 +81,7 @@ async function main() {
   if (process.env.GITHUB_REPOSITORY !== repository || process.env.GITHUB_ACTOR_ID !== '173011369') throw new Error('Solo el propietario puede publicar en el repositorio oficial.')
   const files = await verifyAssets(version, 'release-assets')
   const marker = `<!-- zai-release:${commit} -->`
-  let existing
-  // Only a 404 means there is no release. Authentication or service failures must stop publication.
-  try { existing = JSON.parse(run('gh', ['api', `repos/${repository}/releases/tags/${tag}`])) }
-  catch (error) { if (!String(error.stderr).includes('HTTP 404') && !String(error.stdout).includes('"status":"404"')) throw error }
+  const existing = findRelease(tag)
   if (existing && (!existing.draft || !existing.body?.includes(marker))) throw new Error('Ya existe una publicación para esta etiqueta; no se sobrescribirá.')
   if (!existing) {
     const notes = path.join(tmpdir(), `zai-${tag}-release-notes.md`)
@@ -87,8 +90,8 @@ async function main() {
   }
   run('gh', ['release', 'upload', tag, '--repo', repository, ...files, ...(existing ? ['--clobber'] : [])])
   // The repository makes releases immutable when published. Upload and verify everything first.
-  const uploaded = JSON.parse(run('gh', ['api', `repos/${repository}/releases/tags/${tag}`]))
-  if (uploaded.assets.length !== files.length) throw new Error('La publicación no contiene todos los archivos esperados.')
+  const uploaded = findRelease(tag)
+  if (!uploaded?.draft || !uploaded.body?.includes(marker) || uploaded.assets.length !== files.length) throw new Error('La publicación no contiene todos los archivos esperados o dejó de ser el borrador verificado.')
   for (const file of files) {
     const asset = uploaded.assets.find((asset) => asset.name === path.basename(file))
     const sha = await digest(file)
