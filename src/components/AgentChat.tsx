@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Check, ChevronDown, ChevronRight, Copy, Folder, LoaderCircle, ShieldCheck, Square, X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -57,6 +57,13 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
   const [optionsSection, setOptionsSection] = useState<'model' | 'usage' | 'permissions'>('model')
   const scroll = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
+  const caret = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const position = caret.current
+    if (position === null) return
+    caret.current = null
+    input.current?.focus(); input.current?.setSelectionRange(position, position)
+  }, [draft])
   const stickToBottom = useRef(true)
   const busy = ['running', 'starting', 'waiting'].includes(runtime.status)
   const isCodex = panel.kind === 'codex'
@@ -69,8 +76,8 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
   const quote = useCallback((image: ImageAttachment) => {
     const start = input.current?.selectionStart ?? draftRef.current.length, end = input.current?.selectionEnd ?? start
     const value = `@${image.reference} `
+    caret.current = start + value.length
     setDraft(draftRef.current.slice(0, start) + value + draftRef.current.slice(end))
-    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(start + value.length, start + value.length) })
   }, [])
   const preview = useCallback((reference: string) => { const image = imageLookup.current.get(reference); if (image) setPreviewImage(image) }, [])
   const command = (action: string) => {
@@ -97,7 +104,7 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
       {busy && !runtime.approvals.length && <div className="working-indicator"><span /><span /><span /><small>{runtime.status === 'starting' ? `Conectando con ${panel.title}…` : `${panel.title} está trabajando`}</small></div>}
     </div>
     <div className="chat-bottom">
-      <ChatComposer panel={panel} project={project} runtime={runtime} draft={draft} setDraft={setDraft} input={input} send={send} command={command} chooseFolder={chooseFolder} toast={toast} controls={<AgentControls panel={panel} catalog={catalog} loading={catalogLoading} runtime={runtime} busy={busy} open={optionsOpen} setOpen={setOptionsOpen} section={optionsSection} setSection={setOptionsSection} refresh={refreshCatalog} patch={patch} />} />
+      <ChatComposer panel={panel} project={project} runtime={runtime} draft={draft} setDraft={setDraft} input={input} caret={caret} send={send} command={command} chooseFolder={chooseFolder} toast={toast} controls={<AgentControls panel={panel} catalog={catalog} loading={catalogLoading} runtime={runtime} busy={busy} open={optionsOpen} setOpen={setOptionsOpen} section={optionsSection} setSection={setOptionsSection} refresh={refreshCatalog} patch={patch} />} />
       <div className="chat-footline"><button className="chat-folder" title={project.folder || 'Vincular carpeta del proyecto'} onClick={chooseFolder}><Folder size={12} /><span>{project.folder ? project.folder.split(/[\\/]/).filter(Boolean).pop() : 'Vincular carpeta del proyecto'}</span><ChevronRight size={11} /></button><ContextMeter panel={panel} runtime={runtime} send={send} toast={toast} open={contextOpen} setOpen={setContextOpen} /><button className="chat-usage agent-option-trigger" aria-label={`Ver uso de ${panel.title}`} onClick={() => { setOptionsSection('usage'); setOptionsOpen(optionsSection !== 'usage' || !optionsOpen) }} title="Límites de la cuenta y consumo de la conversación">{catalogLoading && !catalog ? 'Consultando uso…' : usageSummary(catalog)}</button></div>
     </div>
     {previewImage && <ImagePreview image={previewImage} close={() => setPreviewImage(undefined)} />}

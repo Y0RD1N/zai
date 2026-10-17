@@ -8,6 +8,11 @@ for (const provider of ['codex', 'claude', 'zai'] as Provider[]) {
     Object.assign(project, { folder: '/fixture/project', pan: { x: 320, y: 130 }, zoom: 1 })
     Object.assign(panel, { x: 0, y: 0, width: 600, height: 620, sessionId: 'saved', connectionId: 'profile', context: { usedTokens: 24000, windowTokens: 128000, estimated: false, updatedAt: Date.now() }, messages: [{ id: 'u', role: 'user', text: 'Tarea original', time: Date.now() }, { id: 'a', role: 'assistant', text: 'Primera respuesta', time: Date.now() }], timeline: undefined })
     project.panels = [panel]
+    // Delayed frames reproduce cursor jumps when a user types while the board is busy.
+    await page.addInitScript(() => {
+      const frame = window.requestAnimationFrame.bind(window)
+      window.requestAnimationFrame = (callback) => frame((time) => { setTimeout(() => callback(time), 180) })
+    })
     await page.addInitScript(({ workspace }) => {
       if (!localStorage.getItem('zai.workspace.v1')) localStorage.setItem('zai.workspace.v1', JSON.stringify(workspace))
       let event: (value: unknown) => void = () => {}, sequence = 0
@@ -41,7 +46,7 @@ for (const provider of ['codex', 'claude', 'zai'] as Provider[]) {
     await input.press('Tab'); await expect(input).toHaveValue('/native-fixture ')
     await input.fill('$pr'); await input.press('ArrowDown'); await input.press('Enter')
     await expect(input).toHaveValue('$probe ')
-    await input.press('End'); await input.press('ControlOrMeta+End'); await input.press('@'); await input.press('s'); await input.press('r'); await input.press('c'); await input.press('/')
+    await input.pressSequentially('@src/', { delay: 55 })
     await expect(view.getByRole('option', { name: '@src/file with spaces.ts', exact: false })).toBeVisible()
     await input.press('Tab')
     await expect(input).toHaveValue('$probe @"src/file with spaces.ts" ')

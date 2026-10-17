@@ -23,8 +23,8 @@ const referencesFile = (text: string, file: string) => {
   const escaped = (/\s/.test(file) ? JSON.stringify(file) : file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return new RegExp(`(?:^|\\s)@${escaped}(?=\\s|$|[,;!?)])`).test(text)
 }
-export function ChatComposer({ panel, project, runtime, draft, setDraft, input, controls, send, command, chooseFolder, toast }: {
-  panel: Panel; project: Project; runtime: AgentRuntime; draft: string; setDraft: (value: string) => void; input: RefObject<HTMLTextAreaElement | null>; controls: ReactNode
+export function ChatComposer({ panel, project, runtime, draft, setDraft, input, caret, controls, send, command, chooseFolder, toast }: {
+  panel: Panel; project: Project; runtime: AgentRuntime; draft: string; setDraft: (value: string) => void; input: RefObject<HTMLTextAreaElement | null>; caret: RefObject<number | null>; controls: ReactNode
   send: (text: string, submission?: ChatSubmission) => Promise<void>; command: (action: string) => void; chooseFolder: () => void; toast: (text: string) => void
 }) {
   const [cursor, setCursor] = useState(0), [dismissed, setDismissed] = useState(false), [selected, setSelected] = useState(0)
@@ -54,8 +54,8 @@ export function ChatComposer({ panel, project, runtime, draft, setDraft, input, 
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }) }, [selected])
   const insert = (value: string, start = input.current?.selectionStart ?? draft.length, end = input.current?.selectionEnd ?? start) => {
     const next = draft.slice(0, start) + value + draft.slice(end)
+    caret.current = start + value.length
     setDraft(next); setCursor(start + value.length); setDismissed(true)
-    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(start + value.length, start + value.length) })
   }
   const choose = (option: Option) => { if (token) insert(option.insert + ' ', token.start, token.end) }
   const addFiles = async (files: File[]) => {
