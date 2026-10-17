@@ -90,7 +90,9 @@ try {
   await page.getByRole('button', { name: 'Minimizar Navegador', exact: true }).click()
   state = await snapshot()
   expect(state.text).toContain('Guardado: Enviado con Enter')
-  expect((await call('zai_browser_screenshot')).content[0].type).toBe('image')
+  const minimizedImage = await call('zai_browser_screenshot')
+  expect(minimizedImage.isError, minimizedImage.content?.[0]?.text).not.toBe(true)
+  expect(minimizedImage.content[0].type).toBe('image')
   console.log('✓ La conexión sigue funcionando con el navegador minimizado')
 
   await page.getByRole('button', { name: 'Conexión Codex con Navegador', exact: true }).focus()

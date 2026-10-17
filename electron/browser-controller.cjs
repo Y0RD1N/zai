@@ -1,4 +1,5 @@
 const { textResult } = require('./browser-tools.cjs')
+const { nativeImage } = require('electron')
 
 // Runs in a Chromium isolated world. The site cannot replace the reference map.
 function pageAction(action, args) {
@@ -80,7 +81,8 @@ function createBrowserController({ webContents, session, host, hasBrowser, navig
       if (!contents) throw new Error('El navegador está vacío. Usa zai_browser_navigate para abrir una página.')
       if (signal?.aborted) throw new Error('Acción cancelada.')
       if (action === 'screenshot') {
-        const image = await deadline(contents.capturePage(undefined, { stayHidden: true, stayAwake: true }))
+        const captured = await cdp(contents, 'Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
+        const image = nativeImage.createFromBuffer(Buffer.from(captured.data, 'base64'))
         if (image.isEmpty()) throw new Error('No se pudo capturar el navegador. Restaura la ventana e inténtalo otra vez.')
         const resized = image.getSize().width > 1400 ? image.resize({ width: 1400 }) : image
         return { content: [{ type: 'image', mimeType: 'image/png', data: resized.toPNG().toString('base64') }] }
