@@ -1,0 +1,140 @@
+name: Build installers and publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Etiqueta existente en main, igual a la versión de package.json (vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  verify:
+    if: github.repository == 'Y0RD1N/zai' && github.actor_id == '173011369' && github.triggering_actor == 'Y0RD1N'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.verify.outputs.commit }}
+      tag: ${{ steps.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - id: verify
+        run: node scripts/release.mjs verify
+
+  installers:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+            executable: release/linux-unpacked/zai
+            arch: x64
+            build: npx electron-builder --linux AppImage rpm --x64 --publish never
+          - os: windows-latest
+            platform: Windows
+            executable: release/win-unpacked/Zai.exe
+            arch: x64
+            build: npx electron-builder --win nsis --x64 --publish never
+          - os: macos-15-intel
+            executable: release/mac/Zai.app/Contents/MacOS/Zai
+            platform: macOS
+            arch: x64
+            build: npx electron-builder --mac dmg --x64 -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false --publish never
+          - os: macos-latest
+            executable: release/mac-arm64/Zai.app/Contents/MacOS/Zai
+            platform: macOS
+            arch: arm64
+            build: npx electron-builder --mac dmg --arm64 -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false --publish never
+    name: ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      ZAI_TEST_EXECUTABLE: ${{ github.workspace }}/${{ matrix.executable }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:unit
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium --only-shell
+      - run: npm test
+      - name: Install RPM build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y rpm
+      - name: Build installers
+        run: ${{ matrix.build }}
+      - name: Desktop smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' npm run test:desktop
+        env:
+          ZAI_TEST_NO_SANDBOX: '1'
+      - name: Desktop smoke test (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:desktop
+      - name: Prepare installers and SHA-256
+        run: node scripts/release.mjs stage ${{ matrix.platform }} ${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/installers/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    needs: [verify, installers]
+    if: github.repository == 'Y0RD1N/zai' && github.actor_id == '173011369' && github.triggering_actor == 'Y0RD1N'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: release-assets/
+      - name: Verify and publish complete release
+        run: node scripts/release.mjs publish
+        env:
+          GH_TOKEN: ${{ github.token }}

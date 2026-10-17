@@ -168,7 +168,7 @@ La aplicación usa Electron y tiene configuración de empaquetado para:
 | --- | --- |
 | Linux, incluido Fedora | AppImage y RPM |
 | Windows | Instalador NSIS |
-| macOS | DMG |
+| macOS Intel y Apple Silicon | DMG independiente para x64 y arm64 |
 
 ```sh
 npm run dist
@@ -182,12 +182,39 @@ Si Fedora no tiene FUSE 2, puedes abrir el AppImage sin instalarlo utilizando el
 modo de extracción, también probado con el navegador y la terminal:
 
 ```sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.4.1.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.4.1-Linux-x64.AppImage
 ```
 
 La versión inicial se ha probado localmente en Fedora. El workflow de CI está
 preparado para verificar compilación, interfaz, Electron y empaquetado en Linux,
 Windows y macOS. Esto no sustituye pruebas manuales en los tres sistemas.
+
+Los instaladores oficiales se descargan en
+[GitHub Releases](https://github.com/Y0RD1N/zai/releases). El workflow
+`Build installers and publish` se activa al subir una etiqueta `vX.Y.Z`, o de
+forma manual indicando una etiqueta existente. La etiqueta debe coincidir con
+`package.json` y apuntar a un commit de `main`. Solo Y0RD1N puede ejecutarlo.
+Cada sistema compila sus paquetes y prueba la aplicación empaquetada, incluidos
+el navegador real, la terminal, las conexiones API y el guardado. La publicación
+se hace cuando pasan las cuatro variantes. Se comprueban las sumas SHA-256 antes
+y después de subir los archivos a GitHub y se incluye `SHA256SUMS.txt`.
+
+Las versiones publicadas son inmutables: sus instaladores y su etiqueta no se
+pueden sustituir. Las correcciones se distribuyen con una nueva versión. Esta
+primera distribución no incluye certificados de editor de Microsoft o Apple;
+los DMG tienen firma ad hoc y no están notarizados. El sistema operativo puede
+solicitar autorización manual para abrirlos.
+
+## Control del repositorio
+
+Zai sigue siendo público y se distribuye bajo MIT. El desarrollo oficial está
+reservado a @Y0RD1N y las pull requests están deshabilitadas. Las reglas de
+GitHub restringen la creación, modificación y eliminación de ramas y etiquetas
+al propietario. Los workflows utilizan acciones oficiales fijadas a commits
+completos, sin credenciales persistidas en Git y con lectura por defecto. Solo
+el trabajo final de publicación obtiene escritura para subir los instaladores.
+Consulta [la política de mantenimiento](CONTRIBUTING.md).
+
 
 En Fedora, la compilación de `node-pty` puede necesitar `gcc-c++`, `make` y Python.
 Para generar RPM instala también las herramientas de RPM de tu sistema.

@@ -20,7 +20,7 @@
     "test:desktop": "node scripts/test-desktop.mjs && node scripts/test-browser.mjs && node scripts/test-api.mjs",
     "dist": "npm run build && electron-builder",
     "postinstall": "electron-builder install-app-deps",
-    "test:unit": "node --test tests/agents.test.cjs tests/browser.test.cjs tests/api.test.cjs",
+    "test:unit": "node --test tests/agents.test.cjs tests/browser.test.cjs tests/api.test.cjs tests/release.test.mjs",
     "test:providers": "node scripts/probe-agents.mjs"
   },
   "dependencies": {
@@ -69,20 +69,23 @@
       ],
       "category": "Development",
       "icon": "build/icon.png",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "artifactName": "Zai-${version}-Linux-${arch}.${ext}"
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Zai-${version}-Windows-${arch}-Setup.${ext}"
     },
     "mac": {
       "target": [
         "dmg"
       ],
       "category": "public.app-category.developer-tools",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Zai-${version}-macOS-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

@@ -12,3 +12,4 @@ playwright-report/
 .vite/
 .test-data/
 *.tsbuildinfo
+release-assets/
