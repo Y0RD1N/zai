@@ -113,3 +113,20 @@ test('Claude transmite esfuerzo y fast mode y conserva el orden de bloques de te
   assert.equal(events.find((event) => event.type === 'usage').usage.windows[0].usedPercent, 50)
   assert.deepEqual(events.find((event) => event.type === 'metrics').metrics, { inputTokens: 10, outputTokens: 20, costUsd: .01 })
 })
+
+test('Claude aplica el modo nativo y solo habilita bypass cuando se elige explícitamente', async () => {
+  for (const mode of ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions']) {
+    const session = new ClaudeSession({ id: 'permissions-test', cwd: '/tmp' }, () => {})
+    let options, done
+    const finished = new Promise((resolve) => { done = resolve })
+    const consume = session.consume.bind(session)
+    session.consume = async (...args) => { try { await consume(...args) } finally { done() } }
+    session.query = (request) => { options = request.options; return (async function* () { yield { type: 'result', is_error: false } })() }
+    await session.send('Tarea', { permissions: { claudeMode: mode }, browserMcp: { url: 'http://127.0.0.1:1234/mcp', headers: { Authorization: 'Bearer scoped-test-token' } } })
+    await finished
+    assert.equal(options.permissionMode, mode)
+    assert.equal(options.allowDangerouslySkipPermissions === true, mode === 'bypassPermissions')
+    assert.equal(options.mcpServers.zai_browser.type, 'http')
+    assert.equal(options.mcpServers.zai_browser.alwaysLoad, true)
+  }
+})

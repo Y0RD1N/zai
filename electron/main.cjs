@@ -1,10 +1,13 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, webContents, session } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const os = require('node:os')
 const { createAgentManager, findExecutable, launch } = require('./agents.cjs')
 const { createProviderCatalog } = require('./providers.cjs')
 const { resolveSelection } = require('./provider-data.cjs')
+const { permissions } = require('./permissions.cjs')
+const { createBrowserHub } = require('./browser-hub.cjs')
+const { createBrowserController } = require('./browser-controller.cjs')
 
 if (process.env.ZAI_USER_DATA) app.setPath('userData', process.env.ZAI_USER_DATA)
 app.setName('Zai')
@@ -18,11 +21,17 @@ let saving = Promise.resolve()
 const terminals = new Map()
 const terminalStarts = new Map()
 const cancelledTerminals = new Set()
+const agentStarts = new Set()
 const emit = (channel, payload) => {
   if (window && !window.isDestroyed()) window.webContents.send(channel, payload)
 }
 const catalogs = createProviderCatalog((event) => emit('provider:update', event))
+const browserController = createBrowserController({ webContents, session, host: () => window?.webContents,
+  hasBrowser: (id, projectId) => browserHub.hasBrowser(id, projectId), navigate: (event) => emit('browser:navigate', event) })
+const browserHub = createBrowserHub({ perform: (...args) => browserController.perform(...args), describe: (id) => browserController.describe(id),
+  emit: (event) => emit('browser:activity', event), agentEvent: (event) => emit('agent:event', event) })
 const agents = createAgentManager((event) => {
+  if ((event.type === 'status' && ['idle', 'stopped'].includes(event.status)) || event.type === 'error') browserHub.setActive(event.id, false)
   if (event.type === 'usage') catalogs.updateUsage(event.provider, event.usage)
   else emit('agent:event', event)
 })
@@ -64,6 +73,11 @@ handle('project:choose', async () => {
 })
 handle('project:reveal', async (cwd) => shell.openPath(await directory(cwd)))
 handle('app:info', () => ({ platform: process.platform, version: app.getVersion(), home: os.homedir() }))
+handle('browser:sync', (projects) => browserHub.sync(projects))
+handle('browser:register', (data) => {
+  if (!data || !validId(data.id) || !validId(data.projectId) || !Number.isInteger(data.guestId)) throw new Error('Navegador inválido.')
+  browserController.register(data)
+})
 handle('provider:catalog', (provider, refresh) => {
   if (!['codex', 'claude'].includes(provider)) throw new Error('Proveedor inválido')
   return catalogs.get(provider, refresh === true)
@@ -101,14 +115,23 @@ handle('agent:send', async (request) => {
   if (!request || !validId(request.id) || !['codex', 'claude'].includes(request.provider) ||
       typeof request.text !== 'string' || !request.text.trim() || request.text.length > 200_000) throw new Error('Mensaje inválido')
   for (const key of ['model', 'effort', 'speed']) if (request[key] !== undefined && (typeof request[key] !== 'string' || request[key].length > 200)) throw new Error('Configuración del agente inválida')
-  await directory(request.cwd)
-  const catalog = await catalogs.get(request.provider)
-  return agents.send({ ...request, ...resolveSelection(catalog, request) })
+  if (agentStarts.has(request.id) || agents.active(request.id)) throw new Error('Este agente ya está trabajando.')
+  agentStarts.add(request.id)
+  try {
+    await directory(request.cwd)
+    const catalog = await catalogs.get(request.provider)
+    const access = permissions(request.permissions)
+    const browserMcp = await browserHub.configureAgent(request.id, request.provider, access)
+    browserHub.setActive(request.id, true)
+    try { return await agents.send({ ...request, permissions: access, browserMcp, ...resolveSelection(catalog, request) }) }
+    catch (error) { browserHub.setActive(request.id, false); throw error }
+  } finally { agentStarts.delete(request.id) }
 })
-handle('agent:stop', (id) => { if (validId(id)) return agents.stop(id) })
-handle('agent:close', (id) => { if (validId(id)) agents.close(id) })
+handle('agent:stop', (id) => { if (validId(id)) { browserHub.setActive(id, false); return agents.stop(id) } })
+handle('agent:close', (id) => { if (validId(id)) { browserHub.closeAgent(id); agents.close(id) } })
 handle('agent:respond', (id, requestId, response) => {
   if (!validId(id) || typeof requestId !== 'string') throw new Error('Respuesta inválida')
+  if (requestId.startsWith('browser-')) return browserHub.respond(requestId, response, id)
   return agents.respond(id, requestId, response)
 })
 handle('terminal:start', async ({ id, cwd, cols = 80, rows = 24 }) => {
@@ -202,6 +225,8 @@ function shutdown() {
   quitting = true
   agents.dispose()
   catalogs.dispose()
+  browserHub.dispose()
+  browserController.dispose()
   for (const terminal of terminals.values()) terminal.pty.kill()
   saving.catch(() => {}).finally(() => app.quit())
 }
@@ -212,3 +237,4 @@ app.on('before-quit', (event) => {
   if (window && !window.isDestroyed() && rendererReady && !closeConfirmed) window.close()
   else shutdown()
 })
+module.exports = { browserHub }

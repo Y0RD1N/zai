@@ -40,7 +40,7 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
 }) {
   const [draft, setDraft] = useState('')
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const [optionsSection, setOptionsSection] = useState<'model' | 'usage'>('model')
+  const [optionsSection, setOptionsSection] = useState<'model' | 'usage' | 'permissions'>('model')
   const [copied, setCopied] = useState('')
   const scroll = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)

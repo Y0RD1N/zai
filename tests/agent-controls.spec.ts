@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { chooseOption } from './select'
 import type { Provider } from '../src/types'
 
 async function mockAgents(page: import('@playwright/test').Page, noLimits = false) {
@@ -40,9 +41,9 @@ for (const provider of ['codex', 'claude'] as Provider[]) {
     await page.goto('/')
     const panel = page.getByTestId(`panel-${provider}`)
     await panel.getByRole('button', { name: `Configurar modelo de ${title}`, exact: true }).click()
-    await panel.getByLabel(`Modelo de ${title}`, { exact: true }).selectOption(`${provider}-balanced`)
-    await panel.getByLabel(`Esfuerzo de ${title}`, { exact: true }).selectOption('high')
-    await panel.getByLabel(`Velocidad de ${title}`, { exact: true }).selectOption(provider === 'codex' ? 'priority' : 'fast')
+    await chooseOption(page, `Modelo de ${title}`, `${provider}-balanced`)
+    await chooseOption(page, `Esfuerzo de ${title}`, 'high')
+    await chooseOption(page, `Velocidad de ${title}`, provider === 'codex' ? 'priority' : 'fast')
     await panel.getByRole('button', { name: `Cerrar configuración de ${title}`, exact: true }).click()
     await page.getByRole('button', { name: 'Vincular carpeta', exact: true }).click()
     await panel.getByLabel(`Mensaje para ${title}`).fill('Revisar')
@@ -60,10 +61,10 @@ for (const provider of ['codex', 'claude'] as Provider[]) {
     await page.reload()
     expect(await panel.locator('[data-chat-item]').evaluateAll((items) => items.map((item) => item.getAttribute('data-chat-item')))).toEqual(['user', 'assistant', 'tool', 'assistant'])
     await panel.getByRole('button', { name: `Configurar modelo de ${title}`, exact: true }).click()
-    await expect(panel.getByLabel(`Esfuerzo de ${title}`, { exact: true })).toHaveValue('high')
-    await panel.getByLabel(`Modelo de ${title}`, { exact: true }).selectOption(`${provider}-basic`)
+    await expect(panel.getByLabel(`Esfuerzo de ${title}`, { exact: true })).toHaveAttribute('data-value', 'high')
+    await chooseOption(page, `Modelo de ${title}`, `${provider}-basic`)
     await expect(panel.getByLabel(`Esfuerzo de ${title}`, { exact: true })).toBeDisabled()
-    await expect(panel.getByLabel(`Velocidad de ${title}`, { exact: true })).toHaveValue('default')
+    await expect(panel.getByLabel(`Velocidad de ${title}`, { exact: true })).toHaveAttribute('data-value', 'default')
     await expect(panel.getByLabel(`Velocidad de ${title}`, { exact: true })).toBeDisabled()
   })
 }
@@ -88,6 +89,40 @@ test('una conexión sin límites no presenta porcentajes inventados', async ({ p
   const options = page.getByRole('region', { name: 'Configuración de Claude' })
   await expect(options.getByText('Esta conexión no publica límites de cuenta.', { exact: true })).toBeVisible()
   await expect(options.getByRole('progressbar')).toHaveCount(0)
+})
+
+test('los submenús permiten buscar, elegir con teclado y cerrar sin perder la configuración', async ({ page }) => {
+  await mockAgents(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Configurar modelo de Codex', exact: true }).click()
+  const region = page.getByRole('region', { name: 'Configuración de Codex' })
+  const model = page.getByRole('combobox', { name: 'Modelo de Codex', exact: true })
+  await model.click()
+  await page.getByRole('textbox', { name: 'Buscar opciones de Modelo de Codex' }).fill('equilibrado')
+  await page.keyboard.press('End')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(model).toHaveAttribute('data-value', 'codex-balanced')
+  await expect(region).toBeVisible()
+  const effort = page.getByRole('combobox', { name: 'Esfuerzo de Codex', exact: true })
+  await effort.focus()
+  await page.keyboard.press('ArrowDown')
+  const menu = page.locator('.agent-select-popover')
+  await expect(menu.getByText('Equilibrio entre profundidad y tiempo de respuesta.')).toBeVisible()
+  const rect = (await menu.boundingBox())!
+  expect(rect.y).toBeGreaterThanOrEqual(0)
+  expect(rect.y + rect.height).toBeLessThanOrEqual(1000)
+  await page.keyboard.press('End')
+  await page.keyboard.press('Enter')
+  await expect(effort).toHaveAttribute('data-value', 'high')
+  await expect(effort).toBeFocused()
+  await effort.click()
+  await expect(menu.getByRole('option', { name: 'Alto', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(region).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(region).toHaveCount(0)
 })
 
 test('la barra recupera ventanas fuera de vista y de otros proyectos sin perder borradores', async ({ page }) => {

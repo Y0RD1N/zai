@@ -1,6 +1,6 @@
 {
   "name": "zai",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Un espacio para tus agentes, proyectos e ideas.",
   "author": {
@@ -17,10 +17,10 @@
     "start": "electron .",
     "check": "tsc -b && node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/agents.cjs",
     "test": "playwright test",
-    "test:desktop": "node scripts/test-desktop.mjs",
+    "test:desktop": "node scripts/test-desktop.mjs && node scripts/test-browser.mjs",
     "dist": "npm run build && electron-builder",
     "postinstall": "electron-builder install-app-deps",
-    "test:unit": "node --test tests/agents.test.cjs",
+    "test:unit": "node --test tests/agents.test.cjs tests/browser.test.cjs",
     "test:providers": "node scripts/probe-agents.mjs"
   },
   "dependencies": {

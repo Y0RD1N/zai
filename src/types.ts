@@ -6,13 +6,21 @@ export interface Tool { id: string; name?: string; detail?: string; status: stri
 export type ChatItem = { kind: 'message'; id: string } | { kind: 'tool'; tool: Tool }
 export interface Question { id?: string; question: string; header?: string; options?: { label: string; description?: string }[] }
 export interface Approval { requestId: string; title: string; detail: string; kind: string; questions?: Question[] }
+export interface AgentPermissions {
+  codexSandbox: 'read-only' | 'workspace-write' | 'danger-full-access'; codexApproval: 'on-request' | 'untrusted' | 'never'
+  codexNetwork: boolean; claudeMode: 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions'
+  browserAccess: 'read-only' | 'ask' | 'control'
+}
+export interface BrowserConnection { id: string; agentId: string; browserId: string; agentSide: 'left' | 'right'; browserSide: 'left' | 'right' }
+export interface BrowserActivity { agentId: string; browserId: string; operationId: string; action: string; phase: 'started' | 'completed' | 'error'; time: number; error?: string }
+export interface BrowserGraphProject { id: string; panels: { id: string; kind: PanelKind }[]; connections: BrowserConnection[] }
 export interface Panel {
   id: string; kind: PanelKind; title: string; x: number; y: number; width: number; height: number; z: number
   minimized: boolean; iconX: number; iconY: number; maximized?: boolean
   previousBounds?: { x: number; y: number; width: number; height: number }
-  url: string; note: string; messages: Message[]; timeline?: ChatItem[]; sessionId?: string; model: string; effort: string; speed: string
+  url: string; note: string; messages: Message[]; timeline?: ChatItem[]; sessionId?: string; model: string; effort: string; speed: string; permissions: AgentPermissions
 }
-export interface Project { id: string; name: string; color: string; folder: string; panels: Panel[]; pan: { x: number; y: number }; zoom: number }
+export interface Project { id: string; name: string; color: string; folder: string; panels: Panel[]; connections: BrowserConnection[]; pan: { x: number; y: number }; zoom: number }
 export interface Activity { id: string; projectId: string; panelId?: string; text: string; time: number; kind: 'info' | 'success' | 'error' }
 export interface Workspace {
   version: 1; projects: Project[]; activeProjectId: string; theme: 'dark' | 'light'; accent: string
@@ -48,9 +56,13 @@ export interface DesktopBridge {
   providers(): Promise<Record<Provider, ProviderInfo>>
   catalog(provider: Provider, refresh?: boolean): Promise<ProviderCatalog>
   onProvider(listener: (event: { provider: Provider; data: ProviderCatalog }) => void): () => void
+  syncBrowserGraph(projects: BrowserGraphProject[]): Promise<void>
+  registerBrowser(data: { id: string; projectId: string; guestId: number }): Promise<void>
+  onBrowserNavigate(listener: (event: { browserId: string; url: string }) => void): () => void
+  onBrowserActivity(listener: (event: BrowserActivity) => void): () => void
   external(url: string): Promise<void>; window(action: 'minimize' | 'maximize' | 'close'): Promise<void>
   finishClose(): Promise<void>; onClosing(listener: () => void): () => void
-  send(request: { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; model?: string; effort?: string; speed?: string }): Promise<void>
+  send(request: { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; model?: string; effort?: string; speed?: string; permissions?: AgentPermissions }): Promise<void>
   stop(id: string): Promise<void>; closeAgent(id: string): Promise<void>
   respond(id: string, requestId: string, response: { allow: boolean; answers?: Record<string, unknown> }): Promise<void>
   onAgent(listener: (event: AgentEvent) => void): () => void

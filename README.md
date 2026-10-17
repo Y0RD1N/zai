@@ -14,7 +14,13 @@ a tu gusto o conviértelas en iconos sin detener sus sesiones.
   errores y solicitudes de permiso. Conexión a los agentes locales mediante sus
   interfaces oficiales.
 - Selectores de modelo, esfuerzo y velocidad por chat, consultados a cada agente.
-  Límites de cuenta con porcentajes y reinicios cuando el proveedor los publica.
+  Menús con búsqueda de modelos, descripciones, selección por teclado y adaptación
+  al espacio disponible. Límites de cuenta con porcentajes y reinicios cuando el proveedor los publica.
+- Permisos nativos por chat: acceso a archivos, aprobaciones y red en Codex;
+  modos de permisos de Claude, incluida la aceptación de ediciones y planificación.
+- Conexiones entre chats y navegadores mediante puntos que puedes arrastrar.
+  Los agentes pueden leer y controlar los navegadores conectados con herramientas
+  MCP propias. El hilo muestra pulsos al realizar acciones y devolver resultados.
 - Mensajes y herramientas en secuencia cronológica, conservada al reabrir la app.
 - Ventanas movibles y redimensionables, ampliación, iconos movibles y organización
   automática. La barra superior reúne todas las ventanas minimizadas y permite
@@ -60,6 +66,22 @@ personalizados no exponen estos límites; Zai lo indica y muestra el consumo de
 la conversación cuando el agente lo informa.
 Las operaciones que el proveedor someta a aprobación aparecerán en el chat.
 
+El icono de escudo abre «Permisos». Codex permite elegir solo lectura, escritura
+en el proyecto o acceso completo, junto con su política de aprobaciones y acceso
+a red de los comandos. Claude ofrece sus modos nativos de aprobación. Las opciones
+se aplican al siguiente turno y quedan guardadas en ese chat.
+
+Para conectar un navegador, arrastra uno de los puntos de su cabecera hasta un
+punto de Codex o Claude en el mismo proyecto. También puedes pulsar ambos puntos
+con el ratón o con Enter. Pide al agente que use el navegador conectado: puede
+navegar, leer la página, pulsar elementos, escribir en campos, elegir opciones,
+enviar teclas, desplazarse y tomar capturas. El acceso del navegador se configura
+por separado en «Permisos»: solo lectura, preguntar por cada interacción o control.
+Los modos de solo lectura de Codex y Plan de Claude impiden modificar el navegador.
+Los pulsos del hilo corresponden a acciones reales, incluso al minimizar la ventana.
+Para desconectar, selecciona el hilo y pulsa Supr/Backspace o su botón de desconexión.
+Desconectarlo revoca el acceso del agente a ese navegador.
+
 `npm run dev:web` abre la vista previa en `http://127.0.0.1:4317`. En ese modo puedes
 probar la pizarra y el guardado en el navegador; los agentes, las carpetas, la
 terminal y el navegador integrado necesitan Electron.
@@ -86,7 +108,7 @@ Si Fedora no tiene FUSE 2, puedes abrir el AppImage sin instalarlo utilizando el
 modo de extracción, también probado con el navegador y la terminal:
 
 ```sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.2.0.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.3.0.AppImage
 ```
 
 La versión inicial se ha probado localmente en Fedora. El workflow de CI está

@@ -1,4 +1,5 @@
 import type { Activity, Panel, PanelKind, Project, Workspace } from './types'
+import { defaultPermissions, restorePermissions } from './permissions'
 
 export const uid = () => crypto.randomUUID()
 export const names: Record<PanelKind, string> = { codex: 'Codex', claude: 'Claude', browser: 'Navegador', note: 'Notas de la idea', terminal: 'Terminal' }
@@ -10,7 +11,7 @@ export function makePanel(kind: PanelKind, index = 0): Panel {
     width: kind === 'note' ? 280 : kind === 'browser' ? 570 : 450,
     height: kind === 'note' ? 240 : kind === 'browser' ? 320 : 420,
     z: index + 1, minimized: false, iconX: 40 + index * 100, iconY: 30,
-    url: '', note: '', messages: [], timeline: [], model: '', effort: '', speed: 'default',
+    url: '', note: '', messages: [], timeline: [], model: '', effort: '', speed: 'default', permissions: { ...defaultPermissions },
   }
 }
 export function makeProject(name: string, color = colors[0], starter = false): Project {
@@ -22,7 +23,7 @@ export function makeProject(name: string, color = colors[0], starter = false): P
     panels.push({ ...makePanel('note', 3), x: 640, y: 490, width: 270, height: 240, note: 'Una idea para empezar…\n\n¿Qué quieres construir?\n¿Quién se encarga de cada parte?\n\nEste espacio es tuyo. ✦' })
   }
   const zoom = typeof window === 'undefined' ? 0.9 : clamp(Math.min((window.innerWidth - 345) / 910, (window.innerHeight - 284) / 745, 0.9), 0.35, 0.9)
-  return { id: uid(), name, color, folder: '', panels, pan: { x: 305, y: 137 }, zoom }
+  return { id: uid(), name, color, folder: '', panels, connections: [], pan: { x: 305, y: 137 }, zoom }
 }
 export function initialWorkspace(): Workspace {
   const project = makeProject('Zai', colors[0], true)
@@ -42,10 +43,18 @@ export function hydrate(value: unknown): Workspace | null {
       project.panels = project.panels.filter((p) => p && Object.hasOwn(names, p.kind) && typeof p.id === 'string').map((p) => ({
         ...makePanel(p.kind), ...p, x: Number(p.x) || 0, y: Number(p.y) || 0,
         model: typeof p.model === 'string' ? p.model : '', effort: typeof p.effort === 'string' ? p.effort : '', speed: typeof p.speed === 'string' && p.speed ? p.speed : 'default',
+        permissions: restorePermissions(p.permissions),
         width: clamp(Number(p.width) || 440, 250, 2400), height: clamp(Number(p.height) || 410, 190, 2000),
         messages: Array.isArray(p.messages) ? p.messages.filter((m) => m && typeof m.text === 'string' && ['user', 'assistant'].includes(m.role)) : [],
         timeline: Array.isArray(p.timeline) ? p.timeline.filter((item) => item && (item.kind === 'message' && typeof item.id === 'string' || item.kind === 'tool' && typeof item.tool?.id === 'string' && typeof item.tool.status === 'string')).map((item) => item.kind === 'tool' && item.tool.status === 'running' ? { ...item, tool: { ...item.tool, status: 'stopped' } } : item) : (p.messages || []).map((message) => ({ kind: 'message' as const, id: message.id })),
       }))
+      const pairs = new Set<string>()
+      project.connections = (Array.isArray(project.connections) ? project.connections : []).filter((edge) => {
+        if (!edge || typeof edge.id !== 'string' || !project.panels.some((p) => p.id === edge.agentId && ['codex', 'claude'].includes(p.kind)) || !project.panels.some((p) => p.id === edge.browserId && p.kind === 'browser')) return false
+        const key = `${edge.agentId}:${edge.browserId}`
+        if (pairs.has(key)) return false
+        pairs.add(key); return true
+      }).map((edge) => ({ ...edge, agentSide: edge.agentSide === 'left' ? 'left' : 'right', browserSide: edge.browserSide === 'right' ? 'right' : 'left' }))
     }
     if (!data.projects.some((p) => p.id === data.activeProjectId)) data.activeProjectId = data.projects[0].id
     return { ...initialWorkspace(), ...data, theme: data.theme === 'light' ? 'light' : 'dark', accent: colors.includes(data.accent) ? data.accent : colors[0],

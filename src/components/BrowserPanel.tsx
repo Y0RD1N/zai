@@ -1,14 +1,14 @@
 import { createElement, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, ArrowUpRight, Braces, ExternalLink, Globe2, LoaderCircle, LockKeyhole, RotateCw } from 'lucide-react'
 import { normalizeUrl } from '../model'
-import type { Panel } from '../types'
+import type { BrowserActivity, Panel } from '../types'
 
 interface Guest extends HTMLElement {
   loadURL(url: string): Promise<void>; getURL(): string; goBack(): void; goForward(): void; reload(): void
-  canGoBack(): boolean; canGoForward(): boolean; openDevTools(): void
+  getWebContentsId(): number; canGoBack(): boolean; canGoForward(): boolean; openDevTools(): void
 }
-export function BrowserPanel({ panel, projectId, patch, toast, onActivity, focus }: {
-  panel: Panel; projectId: string; patch: (patch: Partial<Panel>) => void; toast: (text: string) => void
+export function BrowserPanel({ panel, projectId, patch, toast, onActivity, focus, connectedAgents, activity }: {
+  panel: Panel; projectId: string; connectedAgents: string[]; activity?: BrowserActivity; patch: (patch: Partial<Panel>) => void; toast: (text: string) => void
   onActivity: (text: string) => void; focus: () => void
 }) {
   const [address, setAddress] = useState(panel.url)
@@ -37,7 +37,7 @@ export function BrowserPanel({ panel, projectId, patch, toast, onActivity, focus
       if (detail.errorCode !== -3 && detail.isMainFrame !== false) { setLoading(false); setError(detail.errorDescription || 'No se pudo abrir esta dirección.') }
     }
     const title = (e: Event) => { const text = (e as Event & { title: string }).title; if (text) callbacks.current.onActivity(`Navegador · ${text.slice(0, 90)}`) }
-    const ready = () => { update(); callbacks.current.focus() }
+    const ready = () => { update(); callbacks.current.focus(); if (window.zai?.registerBrowser) void window.zai.registerBrowser({ id: panel.id, projectId, guestId: el.getWebContentsId() }).catch((error) => toast(String(error))) }
     const listeners: [string, EventListener][] = [['did-start-loading', start], ['did-stop-loading', stop], ['did-navigate', update], ['did-navigate-in-page', update], ['did-fail-load', fail], ['page-title-updated', title], ['dom-ready', ready], ['focus', () => callbacks.current.focus()]]
     for (const [name, fn] of listeners) el.addEventListener(name, fn)
     return () => { for (const [name, fn] of listeners) el.removeEventListener(name, fn) }
@@ -65,6 +65,6 @@ export function BrowserPanel({ panel, projectId, patch, toast, onActivity, focus
       {error && <div className="browser-error"><Globe2 size={28} /><h3>No pudimos abrir esta página</h3><p>{error}</p><button className="secondary-button" onClick={refresh}>Volver a intentar</button></div>}
       {loading && <div className="browser-loading" />}
     </div>
-    <div className="browser-footer"><i />{loading ? 'Cargando página…' : panel.url ? 'Navegación independiente del chat' : 'Listo para probar'}<span>{window.zai ? 'Chromium' : 'Vista previa web'}</span></div>
+    <div className="browser-footer"><i />{loading ? 'Cargando página…' : activity ? `${activity.action} · ${activity.phase === 'started' ? 'En curso' : activity.phase === 'completed' ? 'Completado' : 'Error'}` : connectedAgents.length ? `Conectado con ${connectedAgents.join(' y ')}` : 'Arrastra un punto para conectar un agente'}<span>{window.zai ? 'Chromium' : 'Vista previa web'}</span></div>
   </div>
 }

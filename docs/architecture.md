@@ -14,6 +14,9 @@ flowchart LR
   Main --> Disk[workspace.json local]
   Codex --> CCLI[Codex CLI instalado]
   Claude --> ACLI[Claude Code instalado]
+  CCLI --> MCP[MCP local: navegadores conectados]
+  ACLI --> MCP
+  MCP --> Main
   UI --> Browser[Chromium aislado por proyecto]
 ```
 
@@ -36,6 +39,19 @@ Detener un turno cancela su consulta.
 Los proveedores usan la autenticación que ya maneja su CLI. Zai no lee ni copia sus
 archivos de credenciales. No reemplaza sus modelos por uno fijo: por defecto usa la
 configuración del proveedor y permite indicar un modelo en cada ventana.
+
+### Permisos por chat
+
+`electron/permissions.cjs` valida las opciones con listas cerradas. Codex recibe
+`sandbox` y `approvalPolicy` al iniciar o reanudar el hilo y una `sandboxPolicy`
+explícita en cada turno. La escritura se limita a la carpeta del proyecto, con
+acceso a red configurable; solo lectura y acceso completo usan sus políticas nativas.
+
+Claude recibe `permissionMode` en cada consulta. Zai ofrece `default`, `acceptEdits`,
+`plan`, `dontAsk` y `bypassPermissions`; `allowDangerouslySkipPermissions` solo se
+activa cuando el usuario elige el último. Se mantienen las reglas y los controles
+obligatorios del proveedor. Los cambios se bloquean mientras hay un turno activo.
+Las copias importadas restablecen estos permisos a sus valores iniciales.
 
 ### Modelos, esfuerzo, velocidad y uso
 
@@ -108,6 +124,38 @@ aislamiento de contexto y ausencia de integración con Node; los sitios no recib
 el puente de Zai. Se conservan las protecciones de seguridad del navegador.
 Las ventanas emergentes de autenticación utilizan ventanas de navegador aisladas.
 
+### Conexiones y herramientas del navegador
+
+Cada proyecto guarda aristas entre sus chats y navegadores. `Connections.tsx`
+dibuja curvas SVG que siguen la posición de las ventanas, el zoom y sus iconos
+minimizados. Los puntos admiten arrastrar y soltar o conexión mediante teclado.
+Las partículas solo se activan por eventos de operaciones reales del controlador:
+petición hacia el navegador, resultado de vuelta y señal de error si falla.
+
+`electron/browser-hub.cjs` implementa MCP por HTTP en un puerto aleatorio de
+loopback. Cada chat obtiene un token aleatorio independiente, conservado en memoria.
+El servidor rechaza peticiones con Origin y solo acepta clientes autenticados.
+Codex recibe `mcp_servers.zai_browser` mediante la configuración del hilo; Claude
+recibe el servidor HTTP en `mcpServers`. Ambos descubren las mismas nueve
+herramientas propias sin copiar implementaciones de otros proyectos.
+
+Cada llamada verifica que hay un turno activo y una conexión al navegador dentro
+del mismo proyecto. Las mutaciones respetan el acceso del navegador (leer,
+preguntar o controlar), además de los modos restrictivos del agente. La aprobación
+es para una sola operación y se cancela al desconectar o detener el turno. Las
+acciones se serializan por navegador. Quitar la conexión o cerrar el chat revoca
+su acceso; cerrar el chat también elimina su token.
+
+`electron/browser-controller.cjs` comprueba que cada webview pertenece a la ventana
+principal y a la partición del proyecto. Ofrece navegación HTTP(S), lectura,
+clic, campos, selectores, teclas, desplazamiento y capturas. La lectura asigna
+referencias temporales a elementos visibles y omite valores de contraseñas.
+Las referencias y las operaciones DOM residen en un mundo aislado de Chromium;
+los clics y teclas se envían a ese webview mediante el protocolo de depuración.
+No se ejecuta JavaScript arbitrario proporcionado por el modelo. La implementación
+actual opera sobre el documento principal; no incluye carga de archivos ni control
+del escritorio. Las páginas siguen sin recibir el puente de Zai ni acceso a Node.
+
 Los procesos de agentes, las terminales y el almacenamiento pertenecen al proceso
 principal. El renderer solo recibe una API concreta en `electron/preload.cjs`.
 El proceso principal valida el emisor de cada llamada. Cerrar una ventana termina
@@ -116,7 +164,10 @@ su agente o terminal; salir termina los procesos que aún pertenecen a Zai.
 ## Referencias de protocolo
 
 - [Codex App Server](https://developers.openai.com/codex/app-server/)
+- [MCP en Codex](https://developers.openai.com/codex/mcp/)
 - [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview)
+- [Permisos del SDK de Claude](https://platform.claude.com/docs/en/agent-sdk/permissions)
+- [MCP en el SDK de Claude](https://platform.claude.com/docs/en/agent-sdk/mcp)
 - [Fast mode de Claude Code](https://code.claude.com/docs/en/fast-mode)
 - [Referencia TypeScript del SDK](https://github.com/anthropics/claude-agent-sdk-typescript)
 - [Arquitectura de T3 Code](https://github.com/pingdotgg/t3code/blob/main/docs/internals/overview.md)

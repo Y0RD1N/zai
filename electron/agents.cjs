@@ -6,6 +6,8 @@ const os = require('node:os')
 const { randomUUID } = require('node:crypto')
 const { codexUsage, claudeRateUsage } = require('./provider-data.cjs')
 const { version } = require('../package.json')
+const { permissions, codexThreadPermissions, codexTurnPermissions } = require('./permissions.cjs')
+const { tools: browserTools } = require('./browser-tools.cjs')
 
 function findExecutable(name) {
   const directories = [...(process.env.PATH || '').split(path.delimiter),
@@ -70,7 +72,8 @@ class CodexSession {
   }
   async initialize() {
     await this.connect()
-    const params = { cwd: this.request.cwd, approvalPolicy: 'on-request', sandbox: 'workspace-write' }
+    const params = { cwd: this.request.cwd, ...codexThreadPermissions(this.request.permissions) }
+    if (this.request.browserMcp) params.config = { 'mcp_servers.zai_browser': { url: this.request.browserMcp.url, http_headers: this.request.browserMcp.headers, required: true } }
     if (this.request.model) params.model = this.request.model
     const result = this.request.sessionId
       ? await this.rpc('thread/resume', { ...params, threadId: this.request.sessionId })
@@ -149,7 +152,7 @@ class CodexSession {
     try {
       const result = await this.rpc('turn/start', { threadId: this.threadId, input: [{ type: 'text', text, text_elements: [] }],
         model: selection.model || this.defaultModel, effort: selection.effort || this.defaultEffort,
-        serviceTier: selection.speed && selection.speed !== 'default' ? selection.speed : 'default' })
+        serviceTier: selection.speed && selection.speed !== 'default' ? selection.speed : 'default', ...codexTurnPermissions(selection.permissions, this.request.cwd) })
       this.turnId = result.turn.id
     } catch (error) { this.active = false; throw error }
   }
@@ -198,12 +201,15 @@ class ClaudeSession {
     this.emit({ type: 'status', status: 'running' })
     const abort = this.abort = new AbortController()
     this.messageId = randomUUID()
+    const access = permissions(selection.permissions)
     const options = {
       cwd: this.request.cwd,
       pathToClaudeCodeExecutable: findExecutable('claude'),
       executable: findExecutable('node') || 'node',
       env: { ...agentEnvironment(), CLAUDE_AGENT_SDK_CLIENT_APP: `zai/${version}` },
-      permissionMode: 'default',
+      permissionMode: access.claudeMode,
+      ...(access.claudeMode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(selection.browserMcp ? { mcpServers: { zai_browser: { type: 'http', ...selection.browserMcp, timeout: 180_000, alwaysLoad: true } }, allowedTools: browserTools.map((tool) => `mcp__zai_browser__${tool.name}`) } : {}),
       includePartialMessages: true,
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -329,6 +335,7 @@ function createAgentManager(emit) {
       if (initializing.has(id)) { instance?.close(); sessions.delete(id); emit({ id, type: 'status', status: 'stopped' }); return }
       return instance?.stop()
     },
+    active: (id) => initializing.has(id) || sessions.get(id)?.active === true,
     respond: (id, requestId, response) => sessions.get(id)?.respond(requestId, response),
     close: (id) => { sessions.get(id)?.close(); sessions.delete(id) },
     dispose: () => { for (const instance of sessions.values()) instance.close(); sessions.clear() },
