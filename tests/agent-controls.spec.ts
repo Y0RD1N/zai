@@ -40,6 +40,10 @@ for (const provider of ['codex', 'claude', 'zai'] as Provider[]) {
     await mockAgents(page)
     await page.goto('/')
     if (provider === 'zai') await page.getByRole('button', { name: 'Añadir Zai Agent', exact: true }).click()
+    await page.waitForFunction((provider) => {
+      const workspace = JSON.parse(localStorage.getItem('zai.workspace.v1') || 'null')
+      return workspace?.projects.some((project: { panels: { kind: string }[] }) => project.panels.some((panel) => panel.kind === provider))
+    }, provider)
     await page.locator('.save-status.saved').waitFor()
     for (const bounds of [{ width: 1360, height: 760, zoom: 1 }, { width: 300, height: 240, zoom: .65 }]) {
       await page.evaluate(({ provider, bounds }) => {
