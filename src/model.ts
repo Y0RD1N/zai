@@ -43,6 +43,10 @@ export function hydrate(value: unknown): Workspace | null {
       project.panels = project.panels.filter((p) => p && Object.hasOwn(names, p.kind) && typeof p.id === 'string').map((p) => ({
         ...makePanel(p.kind), ...p, x: Number(p.x) || 0, y: Number(p.y) || 0,
         model: typeof p.model === 'string' ? p.model : '', effort: typeof p.effort === 'string' ? p.effort : '', speed: typeof p.speed === 'string' && p.speed ? p.speed : 'default',
+        generation: p.generation && {
+          maxOutputTokens: Number.isSafeInteger(p.generation.maxOutputTokens) && p.generation.maxOutputTokens! > 0 && p.generation.maxOutputTokens! <= 1_000_000 ? p.generation.maxOutputTokens : undefined,
+          reasoningBudget: Number.isSafeInteger(p.generation.reasoningBudget) && p.generation.reasoningBudget! > 0 && p.generation.reasoningBudget! <= 1_000_000 ? p.generation.reasoningBudget : undefined,
+        },
         permissions: restorePermissions(p.permissions),
         width: clamp(Number(p.width) || 440, 250, 2400), height: clamp(Number(p.height) || 410, 190, 2000),
         messages: Array.isArray(p.messages) ? p.messages.filter((m) => m && typeof m.text === 'string' && ['user', 'assistant'].includes(m.role)) : [],

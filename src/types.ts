@@ -15,12 +15,13 @@ export interface AgentPermissions {
 export interface BrowserConnection { id: string; agentId: string; browserId: string; agentSide: 'left' | 'right'; browserSide: 'left' | 'right' }
 export interface BrowserActivity { agentId: string; browserId: string; operationId: string; action: string; phase: 'started' | 'completed' | 'error'; time: number; error?: string }
 export interface BrowserGraphProject { id: string; panels: { id: string; kind: PanelKind; visible?: boolean }[]; connections: BrowserConnection[] }
+export interface GenerationOptions { maxOutputTokens?: number; reasoningBudget?: number }
 export interface Panel {
   id: string; kind: PanelKind; title: string; x: number; y: number; width: number; height: number; z: number
   minimized: boolean; iconX: number; iconY: number; maximized?: boolean
   previousBounds?: { x: number; y: number; width: number; height: number }
   connectionId?: string;
-  url: string; note: string; messages: Message[]; timeline?: ChatItem[]; sessionId?: string; model: string; effort: string; speed: string; permissions: AgentPermissions
+  url: string; note: string; messages: Message[]; timeline?: ChatItem[]; sessionId?: string; generation?: GenerationOptions; model: string; effort: string; speed: string; permissions: AgentPermissions
 }
 export interface Project { id: string; name: string; color: string; folder: string; panels: Panel[]; connections: BrowserConnection[]; pan: { x: number; y: number }; zoom: number }
 export interface Activity { id: string; projectId: string; panelId?: string; text: string; time: number; kind: 'info' | 'success' | 'error' }
@@ -46,6 +47,7 @@ export type AgentEvent = { id: string } & (
 export interface ProviderInfo { installed: boolean; version?: string; path?: string }
 export interface AgentModel {
   id: string; resolvedModel?: string; name: string; description: string; isDefault: boolean; defaultEffort: string
+  contextWindow?: number; maxOutputTokens?: number; reasoningBudget?: boolean; speedNote?: string
   efforts: { id: string; description: string }[]; speeds: { id: string; name: string; description: string }[]
 }
 export interface UsageWindow { id: string; label: string; group?: string; usedPercent: number | null; resetsAt: number | null; status?: string }
@@ -64,7 +66,7 @@ export interface DesktopBridge {
   apiProfiles(): Promise<APIProfile[]>
   saveAPIProfile(profile: APIProfileInput): Promise<APIProfile>
   deleteAPIProfile(id: string): Promise<void>
-  apiCatalog(id: string, model?: string): Promise<ProviderCatalog>
+  apiCatalog(id: string, model?: string, refresh?: boolean): Promise<ProviderCatalog>
   importBackground(): Promise<string | null>
   generateBackground(request: { profileId: string; model: string; prompt: string; workflow?: string }): Promise<string>
   cancelBackground(): Promise<void>
@@ -74,7 +76,7 @@ export interface DesktopBridge {
   onBrowserActivity(listener: (event: BrowserActivity) => void): () => void
   external(url: string): Promise<void>; window(action: 'minimize' | 'maximize' | 'close'): Promise<void>
   finishClose(): Promise<void>; onClosing(listener: () => void): () => void
-  send(request: { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; connectionId?: string; model?: string; effort?: string; speed?: string; permissions?: AgentPermissions }): Promise<void>
+  send(request: { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; connectionId?: string; model?: string; effort?: string; speed?: string; generation?: GenerationOptions; permissions?: AgentPermissions }): Promise<void>
   stop(id: string): Promise<void>; closeAgent(id: string): Promise<void>
   respond(id: string, requestId: string, response: { allow: boolean; answers?: Record<string, unknown> }): Promise<void>
   onAgent(listener: (event: AgentEvent) => void): () => void

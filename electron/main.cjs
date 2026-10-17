@@ -9,7 +9,7 @@ const { resolveSelection } = require('./provider-data.cjs')
 const { permissions } = require('./permissions.cjs')
 const { createBrowserHub } = require('./browser-hub.cjs')
 const { createAPIProfiles } = require('./api-profiles.cjs')
-const { apiCatalog } = require('./api-catalog.cjs')
+const { apiCatalog, resolveAPISelection } = require('./api-catalog.cjs')
 const { createZaiRuntime } = require('./zai-runtime.cjs')
 const { createBackgrounds } = require('./backgrounds.cjs')
 const { createBrowserController } = require('./browser-controller.cjs')
@@ -122,7 +122,7 @@ handle('graphics:mode', (mode) => {
 handle('api:profiles', () => apiProfiles.list())
 handle('api:save', async (value) => { const result = await apiProfiles.save(value); apiCatalogCache.clear(); return result })
 handle('api:delete', async (id) => { if (!validId(id)) throw new Error('Conexión inválida.'); await apiProfiles.delete(id); apiCatalogCache.clear() })
-handle('api:catalog', (id, model) => { if (!validId(id) || model !== undefined && (typeof model !== 'string' || model.length > 200)) throw new Error('Conexión inválida.'); return connectionCatalog(id, false, model) })
+handle('api:catalog', (id, model, refresh) => { if (!validId(id) || model !== undefined && (typeof model !== 'string' || model.length > 200)) throw new Error('Conexión inválida.'); return connectionCatalog(id, refresh === true, model) })
 handle('background:import', async () => { const result = await dialog.showOpenDialog(window, { title: 'Elegir fondo de la pizarra', properties: ['openFile'], filters: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }] }); return result.canceled ? null : backgrounds.import(result.filePaths[0]) })
 handle('background:generate', (value) => backgrounds.generate(value))
 handle('background:cancel', () => backgrounds.cancel())
@@ -180,7 +180,7 @@ handle('agent:send', async (request) => {
     if (cancelledAgents.has(request.id)) return
     browserHub.setActive(request.id, true)
     try {
-      if (request.provider === 'zai') { const selected = request.model || catalog.defaults.model; return await zaiRuntime.send({ ...request, model: selected, vision: catalog.models.find((m) => m.id === selected)?.vision === true, permissions: access }) }
+      if (request.provider === 'zai') { const selection = resolveAPISelection(catalog, request); return await zaiRuntime.send({ ...request, ...selection, vision: catalog.models.find((m) => m.id === selection.model)?.vision === true, permissions: access }) }
       return await agents.send({ ...request, permissions: access, browserMcp, ...resolveSelection(catalog, request) })
     }
     catch (error) { browserHub.setActive(request.id, false); throw error }

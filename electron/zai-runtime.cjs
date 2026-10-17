@@ -51,7 +51,7 @@ function createZaiRuntime({ directory, profiles, browserHub, emit }) {
         }
       }
       const messageId = randomUUID()
-      const result = await completion(p, { model: request.model, messages: [{ role: 'system', content: context }, ...messages], tools, effort: request.effort, signal, onText: (text) => { if (!child) event(request.id, { type: 'message', messageId, text, delta: true }) } })
+      const result = await completion(p, { model: request.model, messages: [{ role: 'system', content: context }, ...messages], tools, effort: request.effort, speed: request.speed, generation: request.generation, signal, onText: (text) => { if (!child) event(request.id, { type: 'message', messageId, text, delta: true }) } })
       addUsage(session, request.id, result.usage)
       const assistant = result.assistant; messages.push(assistant)
       if (!assistant.tool_calls?.length) return assistant.content
@@ -121,7 +121,7 @@ function createZaiRuntime({ directory, profiles, browserHub, emit }) {
         }
         if (['image-api', 'automatic1111', 'comfyui'].includes(p.kind)) throw new Error('Esta conexión es para imágenes. Selecciona un proveedor de chat.')
         if (!request.model) throw new Error('Elige un modelo para Zai Agent.')
-        event(request.id, { type: 'session', sessionId: session.id }); event(request.id, { type: 'configuration', model: request.model, effort: request.effort || null, speed: 'default' }); event(request.id, { type: 'status', status: 'running' })
+        event(request.id, { type: 'session', sessionId: session.id }); event(request.id, { type: 'configuration', model: request.model, effort: request.effort || null, speed: request.speed || 'default' }); event(request.id, { type: 'status', status: 'running' })
         session.messages.push({ role: 'user', content: request.text }); await persist(session)
         await loop(session, request, p, session.messages)
         event(request.id, { type: 'status', status: 'idle' })

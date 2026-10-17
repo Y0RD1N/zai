@@ -37,11 +37,26 @@ a tu gusto o conviértelas en iconos sin detener sus sesiones.
 ## Zai Agent, APIs y fondos
 
 Zai Agent es un motor original incluido en la aplicación, sin instalar otro CLI.
-En **Preferencias → Conexiones de IA**, agrega DeepSeek, OpenRouter, Ollama Cloud,
-Ollama local o una API de chat compatible. Abre **Nueva ventana → Zai Agent**,
-elige la conexión y vincula la carpeta del proyecto. Los modelos se consultan al
-servidor; también puedes indicar uno manualmente. Ollama Cloud se conecta
+Abre **Nueva ventana → Zai Agent** y elige DeepSeek, OpenRouter, Ollama Cloud,
+Ollama local o una API de chat compatible en el selector de conexiones. Se abre
+el formulario del proveedor para añadir tu API key; al guardar, la conexión
+queda seleccionada. El botón junto al selector permite editar tus conexiones
+o añadir otra. También están en **Preferencias → Conexiones de IA**.
+Vincula la carpeta del proyecto para trabajar con sus archivos. Los modelos se
+consultan al servidor; también puedes indicar uno manualmente. Ollama Cloud se conecta
 directamente; Ollama local necesita que su servicio y sus modelos estén instalados.
+
+El esfuerzo se obtiene de los metadatos del proveedor: `effort.supported_levels`
+en [DeepSeek](https://api-docs.deepseek.com/api/list-models/), `reasoning` en
+[OpenRouter](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens) y
+`thinking.values` de `/api/show` en
+[Ollama](https://docs.ollama.com/capabilities/thinking). Se respeta el valor
+predeterminado y los modelos con razonamiento obligatorio. **Más opciones de
+generación** permite limitar la salida y, si el modelo lo anuncia, fijar un
+presupuesto de razonamiento en tokens. Elegir un esfuerzo elimina ese presupuesto
+y viceversa. OpenRouter también permite priorizar menor latencia o más tokens por
+segundo mediante sus preferencias de servidor; el coste puede variar. Las APIs
+que no ofrecen un modo rápido conservan la velocidad estándar.
 
 El motor ofrece streaming, archivos y búsquedas dentro del proyecto, ediciones,
 terminal, planes, preguntas, skills, revisiones con un subagente de solo lectura,
@@ -167,7 +182,7 @@ Si Fedora no tiene FUSE 2, puedes abrir el AppImage sin instalarlo utilizando el
 modo de extracción, también probado con el navegador y la terminal:
 
 ```sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.4.0.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.4.1.AppImage
 ```
 
 La versión inicial se ha probado localmente en Fedora. El workflow de CI está

@@ -19,7 +19,7 @@ const server = createServer(async (req, res) => {
   }
   let raw = ''; for await (const chunk of req) raw += chunk
   const body = raw ? JSON.parse(raw) : {}; calls.push({ url: req.url, body })
-  if (req.url === '/v1/models') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'fixture', name: 'Modelo de prueba', reasoning: { supported_efforts: ['low', 'high'] } }] })); return }
+  if (req.url === '/v1/models') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'fixture', name: 'Modelo de prueba', context_window: 128000, max_output_tokens: 16384, effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' } }] })); return }
   if (req.url === '/v1/images/generations') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ b64_json: png.toString('base64') }] })); return }
   if (req.url !== '/v1/chat/completions') { res.writeHead(404); res.end(); return }
   const last = body.messages.at(-1)
@@ -38,12 +38,11 @@ try {
   await page.getByRole('heading', { name: '¿Qué construimos hoy?' }).waitFor()
   await expect.poll(async () => page.evaluate(() => window.zai.load())).not.toBeNull()
   await page.evaluate(async ({ folder, base }) => {
-    const profile = await window.zai.saveAPIProfile({ name: 'Motor de prueba', kind: 'compatible', baseUrl: base + '/v1', model: 'fixture', apiKey: 'not-a-real-key' })
     await window.zai.saveAPIProfile({ name: 'Imágenes de prueba', kind: 'image-api', baseUrl: base + '/v1', model: 'image-fixture', apiKey: 'not-a-real-image-key' })
     const workspace = await window.zai.load(), p = workspace.projects[0]
     p.folder = folder; p.zoom = .9; p.pan = { x: 170, y: 170 }
     const agent = p.panels.find((v) => v.kind === 'codex'), browser = p.panels.find((v) => v.kind === 'browser')
-    Object.assign(agent, { kind: 'zai', title: 'Zai Agent', connectionId: profile.id, x: 0, y: 0, width: 500, height: 580, permissions: { ...agent.permissions, zaiMode: 'ask', browserAccess: 'control' } })
+    Object.assign(agent, { kind: 'zai', title: 'Zai Agent', x: 0, y: 0, width: 500, height: 580, permissions: { ...agent.permissions, zaiMode: 'ask', browserAccess: 'control' } })
     Object.assign(browser, { x: 560, y: 0, width: 500, height: 520, url: base + '/page' })
     p.panels = [agent, browser]; p.connections = [{ id: 'fixture-edge', agentId: agent.id, browserId: browser.id, agentSide: 'right', browserSide: 'left' }]
     await window.zai.save(workspace)
@@ -54,7 +53,29 @@ try {
   // macOS constrains windows to its display. Fit the fixture to the actual canvas,
   // so the floating dock cannot cover a fixed-coordinate browser footer.
   await page.getByRole('button', { name: 'Encuadrar pizarra', exact: true }).click()
+  // Configure the first chat connection through the actual interface, from an empty selector.
+  await panel.getByRole('combobox', { name: 'Conexión de Zai Agent', exact: true }).click()
+  for (const name of ['DeepSeek', 'OpenRouter', 'Ollama Cloud', 'Ollama local', 'API de chat compatible']) await expect(page.getByRole('option', { name, exact: true })).toBeVisible()
+  if (process.env.ZAI_TEST_SCREENSHOT_DIR) { await page.waitForTimeout(150); await page.screenshot({ path: path.join(process.env.ZAI_TEST_SCREENSHOT_DIR, 'connections.png') }) }
+  await page.getByRole('option', { name: 'API de chat compatible', exact: true }).click()
+  const connectionSettings = page.getByRole('dialog', { name: 'Conexiones de IA', exact: true })
+  await expect(connectionSettings.getByLabel('Dirección del proveedor', { exact: true })).toHaveValue('http://localhost:1234/v1')
+  await connectionSettings.getByLabel('Nombre de la conexión', { exact: true }).fill('Motor de prueba')
+  await connectionSettings.getByLabel('Dirección del proveedor', { exact: true }).fill(base + '/v1')
+  await connectionSettings.getByLabel('Modelo preferido de la conexión', { exact: true }).fill('fixture')
+  await connectionSettings.getByLabel('Clave API', { exact: true }).fill('not-a-real-key')
+  if (process.env.ZAI_TEST_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.ZAI_TEST_SCREENSHOT_DIR, 'api-key-form.png') })
+  await connectionSettings.getByRole('button', { name: 'Guardar conexión', exact: true }).click()
+  await expect(connectionSettings).toHaveCount(0)
   await expect(page.getByLabel('Conexión de Zai Agent', { exact: true })).toContainText('Motor de prueba')
+  console.log('✓ Primer inicio: proveedores visibles, formulario de API key y selección automática de la conexión')
+  await panel.getByRole('button', { name: 'Configurar modelo de Zai Agent', exact: true }).click()
+  await expect(panel.getByLabel('Esfuerzo de Zai Agent', { exact: true })).toContainText('Auto · Alto')
+  await panel.getByLabel('Esfuerzo de Zai Agent', { exact: true }).click()
+  await page.getByRole('option', { name: 'Máximo', exact: true }).click()
+  await panel.getByText('Más opciones de generación', { exact: true }).click()
+  await panel.getByLabel('Límite de salida de Zai Agent', { exact: true }).fill('8192')
+  await panel.getByRole('button', { name: 'Cerrar configuración de Zai Agent', exact: true }).click()
   await expect.poll(() => application.evaluate(({ webContents }) => webContents.getAllWebContents().find((v) => v.getType() === 'webview')?.getTitle())).toBe('Browser fixture')
   await input.fill('crea y revisa'); await input.press('Enter')
   await panel.getByText('Permitir edición de Zai', { exact: true }).waitFor()
@@ -64,6 +85,7 @@ try {
   expect(await readFile(path.join(folder, 'created.txt'), 'utf8')).toContain('motor de Zai')
   expect(calls.some((c) => c.body.messages?.at(-1)?.tool_call_id === 'snapshot' && c.body.messages.at(-1).content.includes('Página aislada'))).toBe(true)
   expect(await panel.locator('[data-chat-item]').evaluateAll((els) => els.map((el) => el.getAttribute('data-chat-item')))).toEqual(['user', 'tool', 'tool', 'tool', 'assistant'])
+  expect(calls.filter((call) => call.url === '/v1/chat/completions').every((call) => call.body.reasoning_effort === 'max' && call.body.max_tokens === 8192)).toBe(true)
   console.log('✓ Zai Agent: proveedor API, aprobación real, archivos, navegador y orden del historial')
   await input.fill('continúa'); await input.press('Enter')
   await expect(panel.getByText('Trabajo terminado y comprobado.', { exact: true })).toHaveCount(2)
@@ -87,6 +109,8 @@ try {
   console.log('✓ Desconexión bloqueada mientras el navegador trabaja y disponible al quedar libre')
   await page.getByRole('button', { name: 'Preferencias', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Preferencias', exact: true })
+  await settings.getByRole('heading', { name: 'Rendimiento y gráficos', exact: true }).waitFor()
+  if (process.env.ZAI_TEST_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.ZAI_TEST_SCREENSHOT_DIR, 'preferences.png') })
   await settings.getByRole('button', { name: 'Crear con IA', exact: true }).click()
   await settings.getByLabel('Motor para generar fondos', { exact: true }).click()
   await page.getByRole('option', { name: 'Imágenes de prueba', exact: true }).click()
@@ -116,6 +140,13 @@ try {
   await expect.poll(() => page.locator('.canvas-background-image').evaluate((el) => el.naturalWidth)).toBeGreaterThan(0)
   expect(errors).toEqual([])
   console.log(`✓ Fondos generados/importados, protocolo de imágenes, persistencia, claves aisladas y diagnóstico GPU (${graphics.hardware ? 'hardware' : 'software'})`)
+} catch (error) {
+  if (application) {
+    const page = await application.firstWindow()
+    console.error('Errores del chat:', await page.locator('.chat-error').allTextContents())
+    if (process.env.ZAI_TEST_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.ZAI_TEST_SCREENSHOT_DIR, 'failure.png') })
+  }
+  throw error
 } finally {
   releaseNavigation?.()
   await application?.close().catch(() => {}); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); await rm(data, { recursive: true, force: true })

@@ -16,7 +16,7 @@ export function AgentSelect({ label, value, options, onChange, disabled = false,
     const rect = trigger.current?.getBoundingClientRect()
     if (!rect) return
     const width = Math.min(Math.max(rect.width, searchable ? 310 : 245), window.innerWidth - 24)
-    const desired = Math.min(390, options.length * 60 + (searchable ? 56 : 16))
+    const desired = Math.min(390, options.length * 60 + (searchable ? 104 : 88))
     const above = rect.top - 12, below = window.innerHeight - rect.bottom - 12
     const flip = below < Math.min(220, desired) && above > below
     const maxHeight = Math.max(100, Math.min(desired, flip ? above - 7 : below - 7))
@@ -24,7 +24,8 @@ export function AgentSelect({ label, value, options, onChange, disabled = false,
   }
   const show = () => {
     if (disabled) return
-    locate(); setQuery(''); setActive(Math.max(0, options.findIndex((option) => option.value === value))); setOpen(true)
+    const selected = options.findIndex((option) => option.value === value && !option.disabled)
+    locate(); setQuery(''); setActive(Math.max(0, selected < 0 ? options.findIndex((option) => !option.disabled) : selected)); setOpen(true)
   }
   const choose = (option?: SelectOption) => { if (option && !option.disabled) { onChange(option.value); close(true) } }
   useLayoutEffect(() => {

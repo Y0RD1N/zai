@@ -39,14 +39,14 @@ async function* lines(response) {
     pending += decoder.decode(); if (pending) yield pending
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
 }
-async function completion(p, { model, messages, tools, effort, signal, onText }) {
+async function completion(p, { model, messages, tools, effort, speed = 'default', generation = {}, signal, onText }) {
   const native = localOllama(p)
   const thinking = effort === 'none' ? false : effort === 'enabled' ? true : effort || undefined
-  const body = { model, messages, tools: tools.length ? tools : undefined, stream: true,
-    ...(native ? (thinking !== undefined ? { think: thinking } : {}) : { stream_options: { include_usage: true }, ...(p.kind === 'openrouter' ? { provider: { require_parameters: true }, ...(effort ? { reasoning: { effort } } : {}) } : p.kind === 'deepseek' && effort ? { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' }, ...(effort !== 'none' ? { reasoning_effort: effort } : {}) } : effort ? { reasoning_effort: effort } : {}) }) }
+  const body = { model, messages, ...(generation.maxOutputTokens && !native ? { max_tokens: generation.maxOutputTokens } : {}), tools: tools.length ? tools : undefined, stream: true,
+    ...(native ? { ...(thinking !== undefined ? { think: thinking } : {}), ...(generation.maxOutputTokens ? { options: { num_predict: generation.maxOutputTokens } } : {}) } : { stream_options: { include_usage: true }, ...(p.kind === 'openrouter' ? { provider: { require_parameters: true, ...(['latency', 'throughput'].includes(speed) ? { sort: speed } : {}) }, ...(generation.reasoningBudget ? { reasoning: { max_tokens: generation.reasoningBudget } } : effort ? { reasoning: effort === 'enabled' ? { enabled: true } : { effort } } : {}) } : p.kind === 'deepseek' && effort ? { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' }, ...(effort !== 'none' ? { reasoning_effort: effort } : {}) } : effort ? { reasoning_effort: effort } : {}) }) }
   const response = await request(p, native ? '/api/chat' : '/chat/completions', body, signal, 10 * 60_000)
   const assistant = { role: 'assistant', content: '' }, calls = new Map()
-  let usage = {}, finished = false
+  let usage = {}, finished = false, finishReason
   for await (const line of lines(response)) {
     if (!line || !native && !line.startsWith('data:')) continue
     const data = native ? line : line.slice(5).trim()
@@ -73,10 +73,11 @@ async function completion(p, { model, messages, tools, effort, signal, onText })
       calls.set(slot, item)
     }
     if (event.usage) usage = event.usage
-    if (native && event.done) { usage = { prompt_tokens: event.prompt_eval_count, completion_tokens: event.eval_count }; finished = true }
-    if (event.choices?.[0]?.finish_reason) finished = true
+    if (native && event.done) { finishReason = event.done_reason; usage = { prompt_tokens: event.prompt_eval_count, completion_tokens: event.eval_count }; finished = true }
+    if (event.choices?.[0]?.finish_reason) { finishReason = event.choices[0].finish_reason; finished = true }
   }
   if (!finished) throw new Error('La conexión terminó antes de completar la respuesta. Puedes reintentar el turno.')
+  if (finishReason === 'length') throw new Error('Se alcanzó el límite de salida antes de terminar. Aumenta el límite o reduce el presupuesto de razonamiento y vuelve a enviar el mensaje.')
   if (p.kind === 'deepseek' && tools.length && assistant.reasoning_content === undefined) assistant.reasoning_content = ''
   if (calls.size) assistant.tool_calls = [...calls.values()]
   if (native) for (const call of assistant.tool_calls || []) { try { call.function.arguments = JSON.parse(call.function.arguments || '{}') } catch { throw new Error('El modelo devolvió argumentos de herramienta inválidos.') } }

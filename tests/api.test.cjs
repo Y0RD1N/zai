@@ -159,3 +159,75 @@ test('comandos terminan y skills de proyecto se descubren y leen como instruccio
   const text = await performTool('use_skill', { name: 'review-fixture' }, { cwd, signal, availableSkills })
   assert.match(text, /Read before editing/)
 })
+
+test('DeepSeek descubre effort.supported_levels, conserva el predeterminado y envía el esfuerzo o desactiva thinking', async (t) => {
+  const api = await server(t, (url, _body, res) => {
+    if (url === '/chat/completions') { send(res, final('Listo')); return }
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify(url === '/models' ? { data: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', context_window: 1048576, max_output_tokens: 393216, input_modalities: ['text', 'image'], effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' } }] } : {}))
+  })
+  const p = { kind: 'deepseek', baseUrl: api.url, apiKey: 'mock' }
+  const catalog = await apiCatalog(p), selected = catalog.models[0]
+  assert.deepEqual(selected.efforts.map((e) => e.id), ['none', 'low', 'high', 'max'])
+  assert.equal(catalog.defaults.effort, 'high'); assert.equal(selected.contextWindow, 1048576); assert.equal(selected.maxOutputTokens, 393216)
+  const { resolveAPISelection } = require('../electron/api-catalog.cjs')
+  assert.throws(() => resolveAPISelection(catalog, { effort: 'medium' }), /nivel de esfuerzo/)
+  assert.throws(() => resolveAPISelection(catalog, { speed: 'latency' }), /velocidad/)
+  assert.throws(() => resolveAPISelection(catalog, { generation: { maxOutputTokens: 393217 } }), /máximo/)
+  const selection = resolveAPISelection(catalog, { effort: 'max', generation: { maxOutputTokens: 8192, reasoningBudget: undefined } })
+  assert.deepEqual(selection.generation, { maxOutputTokens: 8192 })
+  await completion(p, { ...selection, messages: [], tools: [], onText: () => {} })
+  assert.equal(api.requests.at(-1).body.reasoning_effort, 'max'); assert.equal(api.requests.at(-1).body.max_tokens, 8192)
+  await completion(p, { model: 'deepseek-flash', effort: 'none', messages: [], tools: [], onText: () => {} })
+  assert.deepEqual(api.requests.at(-1).body.thinking, { type: 'disabled' }); assert.equal(api.requests.at(-1).body.reasoning_effort, undefined)
+})
+
+test('OpenRouter respeta esfuerzos nulos, razonamiento obligatorio, presupuestos y prioridades reales de servidor', async (t) => {
+  const api = await server(t, (url, _body, res) => {
+    if (url === '/chat/completions') { send(res, final('Listo')); return }
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify(url === '/models' ? { data: [
+      { id: 'reasoner', context_length: 128000, top_provider: { max_completion_tokens: 16384 }, reasoning: { supported_efforts: null, default_effort: 'high', mandatory: true, supports_max_tokens: true } },
+      { id: 'chat', supported_parameters: ['tools'] },
+      { id: 'optional', reasoning: { supported_efforts: ['none', 'low', 'high'], default_effort: 'high', default_enabled: false } },
+    ] } : {}))
+  })
+  const p = { kind: 'openrouter', baseUrl: api.url, apiKey: 'mock' }, catalog = await apiCatalog(p)
+  assert.deepEqual(catalog.models[0].efforts.map((e) => e.id), ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+  assert.equal(catalog.models[0].reasoningBudget, true); assert.equal(catalog.models[0].maxOutputTokens, 16384)
+  assert.deepEqual(catalog.models[1].efforts, []); assert.equal(catalog.models[2].defaultEffort, 'none')
+  const { resolveAPISelection } = require('../electron/api-catalog.cjs')
+  assert.throws(() => resolveAPISelection(catalog, { effort: 'none' }), /nivel de esfuerzo/)
+  assert.throws(() => resolveAPISelection(catalog, { effort: 'high', generation: { reasoningBudget: 2048, maxOutputTokens: 8192 } }), /uno a la vez/)
+  assert.throws(() => resolveAPISelection(catalog, { generation: { reasoningBudget: 4096, maxOutputTokens: 2048 } }), /mayor/)
+  assert.throws(() => resolveAPISelection(catalog, { model: 'chat', generation: { reasoningBudget: 1024 } }), /no admite/)
+  for (const value of [0, -1, 1.5, NaN, Infinity, '42', 1000001]) assert.throws(() => resolveAPISelection(catalog, { generation: { maxOutputTokens: value } }), /tokens/)
+  const selection = resolveAPISelection(catalog, { speed: 'latency', generation: { reasoningBudget: 4096, maxOutputTokens: 8192 } })
+  await completion(p, { ...selection, messages: [], tools: [], onText: () => {} })
+  const body = api.requests.at(-1).body
+  assert.deepEqual(body.reasoning, { max_tokens: 4096 }); assert.deepEqual(body.provider, { require_parameters: true, sort: 'latency' }); assert.equal(body.max_tokens, 8192)
+})
+
+test('Ollama solo ofrece los niveles que devuelve show, lee su valor por defecto y usa num_predict', async (t) => {
+  const api = await server(t, (url, body, res) => {
+    res.setHeader('Content-Type', 'application/json')
+    if (url === '/api/tags') res.end(JSON.stringify({ models: ['named', 'toggle', 'off', 'unknown'].map((name) => ({ name })) }))
+    else if (url === '/api/show') res.end(JSON.stringify({ capabilities: ['thinking', 'tools'], model_info: { 'general.architecture': 'fixture', 'fixture.context_length': 32768 }, ...(body.model === 'unknown' ? {} : { thinking: { values: body.model === 'named' ? ['low', 'medium', 'high'] : body.model === 'toggle' ? [false, true] : [false], default: body.model === 'named' ? 'medium' : true } }) }))
+    else if (url === '/api/chat') res.end(JSON.stringify({ message: { content: 'Listo' }, done: true }) + '\n')
+    else res.end('{}')
+  })
+  const p = { kind: 'ollama-local', baseUrl: api.url }
+  for (const [model, efforts, defaultEffort] of [['named', ['low', 'medium', 'high'], 'medium'], ['toggle', ['none', 'enabled'], 'enabled'], ['off', [], ''], ['unknown', [], '']]) {
+    const catalog = await apiCatalog({ ...p, model })
+    assert.deepEqual(catalog.models.find((m) => m.id === model).efforts.map((e) => e.id), efforts)
+    assert.equal(catalog.defaults.effort, defaultEffort); assert.equal(catalog.models.find((m) => m.id === model).contextWindow, 32768)
+  }
+  await completion(p, { model: 'named', effort: 'low', generation: { maxOutputTokens: 4096 }, messages: [], tools: [], onText: () => {} })
+  assert.equal(api.requests.at(-1).body.think, 'low'); assert.deepEqual(api.requests.at(-1).body.options, { num_predict: 4096 })
+})
+
+
+test('un límite de salida agotado informa el problema y no ejecuta herramientas truncadas', async (t) => {
+  const api = await server(t, (_url, _body, res) => send(res, [{ choices: [{ delta: { tool_calls: [{ index: 0, id: 'cut', function: { name: 'write_file', arguments: '{' } }] }, finish_reason: 'length' }], usage: { completion_tokens: 20 } }]))
+  await assert.rejects(completion({ kind: 'compatible', baseUrl: api.url }, { model: 'test', generation: { maxOutputTokens: 20 }, messages: [], tools: definitions, onText: () => {} }), /límite de salida/)
+})
