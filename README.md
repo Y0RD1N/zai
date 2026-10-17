@@ -72,6 +72,13 @@ Construye en el sistema de destino para compilar sus dependencias nativas.
 Los paquetes aparecen en `release/`. La firma de distribución de Windows y macOS
 requiere configurar certificados propios; no se incluyen certificados en el repo.
 
+Si Fedora no tiene FUSE 2, puedes abrir el AppImage sin instalarlo utilizando el
+modo de extracción, también probado con el navegador y la terminal:
+
+```sh
+APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.1.0.AppImage
+```
+
 La versión inicial se ha probado localmente en Fedora. El workflow de CI está
 preparado para verificar compilación, interfaz, Electron y empaquetado en Linux,
 Windows y macOS. Esto no sustituye pruebas manuales en los tres sistemas.

@@ -17,16 +17,17 @@ const url = `http://127.0.0.1:${server.address().port}/`
 let application
 const errors = []
 const launch = async () => {
-  const application = await _electron.launch({
+  const instance = await _electron.launch({
     ...(process.env.ZAI_TEST_EXECUTABLE ? { executablePath: process.env.ZAI_TEST_EXECUTABLE } : {}),
     args: [...(process.env.ZAI_TEST_NO_SANDBOX ? ['--no-sandbox'] : []), ...(process.env.ZAI_TEST_EXECUTABLE ? [] : [root])],
     env: { ...process.env, ZAI_USER_DATA: data, ZAI_TEST: '1', ZAI_DEV_URL: '' },
   })
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1600, 1000))
-  const page = await application.firstWindow()
+  application = instance
+  const page = await instance.firstWindow()
+  await instance.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1600, 1000))
   page.on('pageerror', (error) => errors.push(error.message))
   await page.getByRole('heading', { name: '¿Qué construimos hoy?' }).waitFor()
-  return { application, page }
+  return { application: instance, page }
 }
 try {
   let session = await launch()
@@ -97,5 +98,5 @@ try {
 } finally {
   if (application) await application.close()
   await new Promise((resolve) => server.close(resolve))
-  await rm(data, { recursive: true, force: true })
+  await rm(data, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 })
 }
