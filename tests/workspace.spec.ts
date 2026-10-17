@@ -81,7 +81,7 @@ test('la importación añade proyectos sin sustituir los existentes ni sus sesio
   snapshot.projects[0].folder = '/carpeta/no/autorizada'
   snapshot.projects[0].panels[0].sessionId = 'sesion-ajena'
   await page.getByRole('button', { name: 'Preferencias', exact: true }).click()
-  await page.locator('input[type=file]').setInputFiles({ name: 'respaldo.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(snapshot)) })
+  await page.locator('input[type=file][accept="application/json,.json"]').setInputFiles({ name: 'respaldo.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(snapshot)) })
   await expect(page.locator('.project-item')).toHaveCount(2)
   await page.getByText('Guardado localmente', { exact: true }).waitFor()
   const imported = await page.evaluate(() => JSON.parse(localStorage.getItem('zai.workspace.v1')!) as Workspace)

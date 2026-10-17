@@ -17,6 +17,42 @@ async function server(t, handler) {
 }
 const send = (res, chunks) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); for (const chunk of chunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`); res.end('data: [DONE]\n\n') }
 const final = (text) => [{ choices: [{ delta: { content: text }, finish_reason: null }] }, { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 4, cost: .001 } }]
+test('Zai compacta de verdad, conserva el contexto si falla y rehidrata imágenes sin guardarlas en base64', async (t) => {
+  const directory = await temp(t), events = []
+  let failSummary = false
+  const api = await server(t, (_url, body, res) => {
+    if (body.messages[0].content.startsWith('Summarize a coding')) {
+      if (failSummary) { res.writeHead(503); res.end(); return }
+      send(res, final('Goal: preserve the original task. Pending: verify the result. Image: @imagen1.')); return
+    }
+    send(res, final('Hecho.'))
+  })
+  const runtime = createZaiRuntime({ directory, attachments: { read: async () => Buffer.from('image-fixture') }, profiles: { get: async () => ({ kind: 'compatible', baseUrl: api.url }) }, browserHub: {}, emit: (event) => events.push(event) })
+  t.after(() => runtime.dispose())
+  const request = { id: 'compact-fixture', cwd: directory, connectionId: 'fixture', model: 'fixture', permissions: { zaiMode: 'ask' }, contextWindow: 128000, vision: true, text: 'Original task '.repeat(200), images: [{ id: 'fixture.png', reference: 'imagen1', name: 'image.png' }] }
+  await runtime.send(request)
+  const sessionId = events.find((e) => e.type === 'session').sessionId, file = path.join(directory, sessionId + '.json')
+  assert.equal(api.requests[0].body.messages.at(-1).content.at(-1).type, 'image_url')
+  assert.equal((await fs.readFile(file, 'utf8')).includes(Buffer.from('image-fixture').toString('base64')), false)
+  const measured = events.filter((e) => e.context?.usedTokens !== undefined).at(-1).context
+  assert.equal(measured.usedTokens, 14); assert.equal(measured.windowTokens, 128000); assert.equal(measured.estimated, false)
+  failSummary = true
+  const before = JSON.parse(await fs.readFile(file, 'utf8')).messages
+  await assert.rejects(runtime.send({ ...request, images: [], action: 'compact', sessionId }), /HTTP 503/)
+  assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')).messages, before)
+  assert.equal(events.some((e) => e.tool?.name === 'Compactar contexto' && e.tool.status === 'failed'), true)
+  failSummary = false
+  await runtime.send({ ...request, images: [], action: 'compact', sessionId })
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'))
+  assert.match(saved.messages[0].content, /preserve the original task/)
+  assert.equal(saved.messages.some((m) => m.content === '/compact'), false)
+  assert.equal(saved.context.estimated, true)
+  await runtime.send({ ...request, images: [], sessionId, text: 'continue' })
+  const last = api.requests.at(-1).body
+  assert.equal(last.messages.some((m) => typeof m.content === 'string' && m.content.includes('Original task Original task')), false)
+  assert.equal(last.messages.some((m) => typeof m.content === 'string' && m.content.includes('preserve the original task')), true)
+  assert.equal(events.filter((e) => e.context?.usedTokens !== undefined).at(-1).context.usedTokens, 14)
+})
 
 test('claves fuera de metadatos y cifradas; basic_text solo conserva clave en memoria', async (t) => {
   const directory = await temp(t)

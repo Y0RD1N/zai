@@ -1,7 +1,12 @@
 export type Provider = 'codex' | 'claude' | 'zai'
 export type PanelKind = Provider | 'browser' | 'note' | 'terminal'
 export type AgentStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'error' | 'stopped'
-export interface Message { id: string; role: 'user' | 'assistant'; text: string; time: number }
+export interface ImageAttachment { id: string; name: string; reference: string; mimeType: string; width: number; height: number; bytes: number }
+export interface ChatSubmission { attachments?: ImageAttachment[]; references?: string[]; action?: 'compact' }
+export interface Message { id: string; role: 'user' | 'assistant'; text: string; time: number; attachments?: ImageAttachment[] }
+export interface ContextUsage { usedTokens?: number; windowTokens?: number; estimated?: boolean; compacting?: boolean; updatedAt: number }
+export interface ComposerCommand { name: string; description: string; action?: string; argumentHint?: string }
+export interface ComposerOptions { commands: ComposerCommand[]; skills: { name: string; description: string; path?: string }[]; apps: { name: string; token: string; description: string; path: string }[]; error?: string }
 export interface Tool { id: string; name?: string; detail?: string; status: string; output?: string }
 export type ChatItem = { kind: 'message'; id: string } | { kind: 'tool'; tool: Tool }
 export interface Question { id?: string; question: string; header?: string; options?: { label: string; description?: string }[] }
@@ -20,7 +25,7 @@ export interface Panel {
   id: string; kind: PanelKind; title: string; x: number; y: number; width: number; height: number; z: number
   minimized: boolean; iconX: number; iconY: number; maximized?: boolean
   previousBounds?: { x: number; y: number; width: number; height: number }
-  connectionId?: string;
+  connectionId?: string; context?: ContextUsage;
   url: string; note: string; messages: Message[]; timeline?: ChatItem[]; sessionId?: string; generation?: GenerationOptions; model: string; effort: string; speed: string; permissions: AgentPermissions
 }
 export interface Project { id: string; name: string; color: string; folder: string; panels: Panel[]; connections: BrowserConnection[]; pan: { x: number; y: number }; zoom: number }
@@ -38,16 +43,18 @@ export type AgentEvent = { id: string } & (
   { type: 'message'; messageId: string; text: string; delta: boolean } |
   { type: 'tool'; tool: Tool } |
   { type: 'session'; sessionId: string; model?: string } |
+  { type: 'reset'; sessionId: string } |
   { type: 'approval'; approval: Approval } |
   { type: 'resolved'; requestId: string } |
   ({ type: 'configuration' } & AgentConfiguration) |
   { type: 'metrics'; metrics: ConversationMetrics } |
+  { type: 'context'; context: Partial<ContextUsage> & { updatedAt: number } } |
   { type: 'error'; message: string }
 )
 export interface ProviderInfo { installed: boolean; version?: string; path?: string }
 export interface AgentModel {
   id: string; resolvedModel?: string; name: string; description: string; isDefault: boolean; defaultEffort: string
-  contextWindow?: number; maxOutputTokens?: number; reasoningBudget?: boolean; speedNote?: string
+  contextWindow?: number; maxOutputTokens?: number; reasoningBudget?: boolean; speedNote?: string; vision?: boolean
   efforts: { id: string; description: string }[]; speeds: { id: string; name: string; description: string }[]
 }
 export interface UsageWindow { id: string; label: string; group?: string; usedPercent: number | null; resetsAt: number | null; status?: string }
@@ -76,7 +83,10 @@ export interface DesktopBridge {
   onBrowserActivity(listener: (event: BrowserActivity) => void): () => void
   external(url: string): Promise<void>; window(action: 'minimize' | 'maximize' | 'close'): Promise<void>
   finishClose(): Promise<void>; onClosing(listener: () => void): () => void
-  send(request: { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; connectionId?: string; model?: string; effort?: string; speed?: string; generation?: GenerationOptions; permissions?: AgentPermissions }): Promise<void>
+  send(request: ChatSubmission & { id: string; provider: Provider; text: string; cwd: string; sessionId?: string; connectionId?: string; model?: string; effort?: string; speed?: string; generation?: GenerationOptions; permissions?: AgentPermissions }): Promise<void>
+  composerOptions(request: { provider: Provider; cwd: string; refresh?: boolean }): Promise<ComposerOptions>
+  composerFiles(cwd: string, query?: string): Promise<string[]>
+  attachImage(request: { name: string; dataUrl: string }): Promise<Omit<ImageAttachment, 'reference'>>
   stop(id: string): Promise<void>; closeAgent(id: string): Promise<void>
   respond(id: string, requestId: string, response: { allow: boolean; answers?: Record<string, unknown> }): Promise<void>
   onAgent(listener: (event: AgentEvent) => void): () => void

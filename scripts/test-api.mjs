@@ -19,7 +19,7 @@ const server = createServer(async (req, res) => {
   }
   let raw = ''; for await (const chunk of req) raw += chunk
   const body = raw ? JSON.parse(raw) : {}; calls.push({ url: req.url, body })
-  if (req.url === '/v1/models') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'fixture', name: 'Modelo de prueba', context_window: 128000, max_output_tokens: 16384, effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' } }] })); return }
+  if (req.url === '/v1/models') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'fixture', name: 'Modelo de prueba', input_modalities: ['text', 'image'], context_window: 128000, max_output_tokens: 16384, effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' } }] })); return }
   if (req.url === '/v1/images/generations') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ b64_json: png.toString('base64') }] })); return }
   if (req.url !== '/v1/chat/completions') { res.writeHead(404); res.end(); return }
   const last = body.messages.at(-1)
@@ -107,6 +107,31 @@ try {
   await expect(disconnect).toBeEnabled({ timeout: 15_000 }); await disconnect.click()
   await expect(page.getByTestId('browser-connection')).toHaveCount(0)
   console.log('✓ Desconexión bloqueada mientras el navegador trabaja y disponible al quedar libre')
+  await application.evaluate(async ({ clipboard, ClipboardItem, nativeImage }, encoded) => clipboard.write([new ClipboardItem({ 'image/png': new Blob([nativeImage.createFromDataURL('data:image/png;base64,' + encoded).toPNG()], { type: 'image/png' }) })]), png.toString('base64'))
+  await input.click(); await input.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V')
+  await expect(panel.getByRole('button', { name: 'Citar imagen1', exact: true })).toBeVisible()
+  await expect.poll(() => panel.locator('.chat-image-preview img').evaluate((el) => el.naturalWidth)).toBe(16)
+  await panel.getByRole('button', { name: 'Citar imagen1', exact: true }).click()
+  await expect(input).toHaveValue(/@imagen1/)
+  await input.fill('Revisa @imagen1 y @crea')
+  await panel.getByRole('option', { name: '@created.txt', exact: false }).click()
+  await input.press('Enter')
+  await expect(panel.locator('.message-user .chat-image-preview')).toHaveCount(1)
+  await expect(panel.getByRole('button', { name: 'Detener Zai Agent', exact: true })).toHaveCount(0)
+  const visual = calls.filter((call) => call.url === '/v1/chat/completions').at(-1).body.messages.at(-1)
+  expect(visual.role).toBe('user'); expect(visual.content.some((v) => v.type === 'image_url' && v.image_url.url.startsWith('data:image/png;base64,'))).toBe(true)
+  expect(visual.content.some((v) => v.type === 'text' && v.text.includes('Archivo creado por el motor de Zai.'))).toBe(true)
+  await panel.getByRole('button', { name: 'Ver contexto de Zai Agent', exact: true }).click()
+  await panel.getByRole('button', { name: 'Compactar contexto', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Compactar contexto', exact: true })).toBeEnabled()
+  await expect(panel.getByText('Contexto resumido; el historial visible se conserva.', { exact: false })).toHaveCount(1)
+  if (process.env.ZAI_TEST_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.ZAI_TEST_SCREENSHOT_DIR, 'chat-context-images.png') })
+  await panel.getByRole('button', { name: 'Cerrar contexto', exact: true }).click()
+  await page.locator('.save-status.saved').waitFor({ state: 'attached' })
+  const withImages = await page.evaluate(() => window.zai.load())
+  const visualSession = withImages.projects[0].panels[0].sessionId
+  expect((await readFile(path.join(data, 'agent-sessions', visualSession + '.json'), 'utf8')).includes(png.toString('base64'))).toBe(false)
+  console.log('✓ Pegado real desde portapapeles, imágenes privadas, menciones de archivos y compactación sin borrar el historial')
   await page.getByRole('button', { name: 'Preferencias', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Preferencias', exact: true })
   await settings.getByRole('heading', { name: 'Rendimiento y gráficos', exact: true }).waitFor()

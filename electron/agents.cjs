@@ -8,6 +8,7 @@ const { codexUsage, claudeRateUsage } = require('./provider-data.cjs')
 const { version } = require('../package.json')
 const { permissions, codexThreadPermissions, codexTurnPermissions } = require('./permissions.cjs')
 const { tools: browserTools } = require('./browser-tools.cjs')
+const { codexInput, claudeContent } = require('./attachments.cjs')
 
 function findExecutable(name) {
   const directories = [...(process.env.PATH || '').split(path.delimiter),
@@ -100,9 +101,10 @@ class CodexSession {
     }
     const p = frame.params || {}
     if (frame.method === 'account/rateLimits/updated') this.emit({ type: 'usage', provider: 'codex', usage: { ...codexUsage(p), partial: true } })
-    if (frame.method === 'thread/tokenUsage/updated' && p.tokenUsage?.total) {
+    if (frame.method === 'thread/tokenUsage/updated' && p.tokenUsage?.total && (!this.threadId || p.threadId === this.threadId)) {
       const total = p.tokenUsage.total
       this.emit({ type: 'metrics', metrics: { inputTokens: total.inputTokens || 0, outputTokens: total.outputTokens || 0 } })
+      this.emit({ type: 'context', context: { usedTokens: p.tokenUsage.last?.totalTokens, windowTokens: p.tokenUsage.modelContextWindow || undefined, estimated: false, compacting: false, updatedAt: Date.now() } })
     }
     if (frame.id !== undefined && frame.method) {
       const requestId = String(frame.id)
@@ -125,6 +127,10 @@ class CodexSession {
     if (frame.method === 'item/agentMessage/delta') this.emit({ type: 'message', messageId: p.itemId, text: p.delta, delta: true })
     if (frame.method === 'item/started' || frame.method === 'item/completed') {
       const item = p.item || {}
+      if (item.type === 'contextCompaction') {
+        this.emit({ type: 'context', context: { compacting: frame.method === 'item/started', updatedAt: Date.now() } })
+        this.emit({ type: 'tool', tool: { id: item.id, name: 'Compactar contexto', status: frame.method === 'item/started' ? 'running' : 'completed', output: frame.method === 'item/completed' ? 'Codex compactó la sesión. El historial visible se conserva.' : undefined } })
+      }
       if (item.type === 'agentMessage' && frame.method === 'item/completed') this.emit({ type: 'message', messageId: item.id, text: item.text || '', delta: false })
       if (['commandExecution', 'fileChange', 'mcpToolCall', 'webSearch', 'dynamicToolCall'].includes(item.type)) {
         const detail = item.command || item.query || item.tool || item.changes?.map((c) => c.path).join(', ') || ''
@@ -137,6 +143,7 @@ class CodexSession {
     }
     if (frame.method === 'turn/completed') {
       this.active = false
+      this.emit({ type: 'context', context: { compacting: false, updatedAt: Date.now() } })
       for (const requestId of this.approvals.keys()) this.emit({ type: 'resolved', requestId })
       this.approvals.clear()
       if (p.turn?.status === 'interrupted') this.emit({ type: 'status', status: 'stopped' })
@@ -150,11 +157,19 @@ class CodexSession {
     this.active = true
     this.emit({ type: 'status', status: 'running' })
     try {
-      const result = await this.rpc('turn/start', { threadId: this.threadId, input: [{ type: 'text', text, text_elements: [] }],
+      const result = await this.rpc('turn/start', { threadId: this.threadId, input: codexInput(text, selection.images, selection.skills, selection.apps),
         model: selection.model || this.defaultModel, effort: selection.effort || this.defaultEffort,
         serviceTier: selection.speed && selection.speed !== 'default' ? selection.speed : 'default', ...codexTurnPermissions(selection.permissions, this.request.cwd) })
       this.turnId = result.turn.id
     } catch (error) { this.active = false; throw error }
+  }
+  async compact() {
+    if (this.active) throw new Error('Espera a que termine el turno antes de compactar.')
+    this.active = true
+    this.emit({ type: 'status', status: 'running' })
+    this.emit({ type: 'context', context: { compacting: true, updatedAt: Date.now() } })
+    try { await this.rpc('thread/compact/start', { threadId: this.threadId }) }
+    catch (error) { this.active = false; this.emit({ type: 'context', context: { compacting: false, updatedAt: Date.now() } }); throw error }
   }
   async stop() {
     if (this.active && this.turnId) await this.rpc('turn/interrupt', { threadId: this.threadId, turnId: this.turnId })
@@ -235,16 +250,24 @@ class ClaudeSession {
       },
     }
     // The provider owns authentication and session files; Zai never reads tokens.
-    const prompt = (async function* () { yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null } })()
+    if (selection.action === 'compact') this.emit({ type: 'context', context: { compacting: true, updatedAt: Date.now() } })
+    const prompt = (async function* () { yield { type: 'user', message: { role: 'user', content: claudeContent(text, selection.images) }, parent_tool_use_id: null } })()
     try { this.stream = this.query({ prompt, options }) }
     catch (error) { this.active = false; throw error }
     this.consume(this.stream, abort).catch((error) => { if (!abort.signal.aborted) this.emit({ type: 'error', message: error.message }) })
   }
   async consume(stream, abort) {
     const streamedText = new Set()
-    let finished = false, finalError
+    let finished = false, finalError, hasText = false
     try {
       for await (const event of stream) {
+        if (event.type === 'conversation_reset') {
+          this.sessionId = event.new_conversation_id
+          this.context = undefined
+          this.emit({ type: 'reset', sessionId: this.sessionId })
+          hasText = false
+          continue
+        }
         if (event.session_id && event.session_id !== this.sessionId) {
           this.sessionId = event.session_id
           this.emit({ type: 'session', sessionId: this.sessionId })
@@ -253,7 +276,17 @@ class ClaudeSession {
           const usage = claudeRateUsage(event.rate_limit_info)
           if (usage) this.emit({ type: 'usage', provider: 'claude', usage })
         }
-        if (event.type === 'system' && event.subtype === 'init') this.emit({ type: 'configuration', model: event.model, effort: event.effort, speed: event.fast_mode_state, speedReason: event.fast_mode_disabled_reason })
+        if (event.type === 'system' && ['local_command_output', 'informational'].includes(event.subtype) && event.content) {
+          hasText = true
+          this.emit({ type: 'message', messageId: event.uuid || randomUUID(), text: event.content, delta: false })
+        }
+        if (event.type === 'system' && event.subtype === 'init') { this.model = event.model; this.emit({ type: 'configuration', model: event.model, effort: event.effort, speed: event.fast_mode_state, speedReason: event.fast_mode_disabled_reason }) }
+        if (event.type === 'system' && event.subtype === 'compact_boundary') {
+          this.context = { ...this.context, usedTokens: event.compact_metadata?.post_tokens, estimated: true, compacting: false, updatedAt: Date.now() }
+          this.emit({ type: 'context', context: this.context })
+          this.emit({ type: 'tool', tool: { id: event.uuid || randomUUID(), name: 'Compactar contexto', status: 'completed', output: `Claude compactó la sesión (${event.compact_metadata?.trigger === 'auto' ? 'automáticamente' : 'a petición'}). El historial visible se conserva.` } })
+        }
+        if (event.context_usage) { this.context = { usedTokens: event.context_usage.total_tokens, windowTokens: event.context_usage.raw_max_tokens, estimated: true, updatedAt: Date.now() }; this.emit({ type: 'context', context: this.context }) }
         if (event.fast_mode_state && !(event.type === 'system' && event.subtype === 'init')) this.emit({ type: 'configuration', speed: event.fast_mode_state, speedReason: event.fast_mode_disabled_reason })
         if (event.type === 'stream_event') {
           const frame = event.event
@@ -263,14 +296,20 @@ class ClaudeSession {
             this.emit({ type: 'tool', tool: { id: block.id, name: block.name, detail: 'Preparando argumentos…', status: 'running' } })
           }
           if (frame.type === 'content_block_delta' && frame.delta.type === 'text_delta') {
+            hasText = true
             streamedText.add(this.messageId)
             this.emit({ type: 'message', messageId: `${this.messageId}:text:${frame.index}`, text: frame.delta.text, delta: true })
           }
         }
         if (event.type === 'assistant') {
+          if (!event.parent_tool_use_id && !event.agent_id && event.message.usage) {
+            const u = event.message.usage
+            this.context = { ...this.context, usedTokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0), estimated: false, updatedAt: Date.now() }
+            this.emit({ type: 'context', context: this.context })
+          }
           const blocks = event.message.content || []
           for (const [index, block] of blocks.entries()) {
-            if (block.type === 'text' && block.text && !streamedText.has(event.message.id)) this.emit({ type: 'message', messageId: `${event.message.id}:text:${index}`, text: block.text, delta: false })
+            if (block.type === 'text' && block.text && !streamedText.has(event.message.id)) { hasText = true; this.emit({ type: 'message', messageId: `${event.message.id}:text:${index}`, text: block.text, delta: false }) }
             if (block.type === 'tool_use') {
               const input = block.input || {}
               this.emit({ type: 'tool', tool: { id: block.id, name: block.name, detail: String(input.command || input.file_path || input.description || JSON.stringify(input)).slice(0, 16_000), status: 'running' } })
@@ -282,16 +321,28 @@ class ClaudeSession {
         }
         if (event.type === 'result') {
           finished = true
+          if (!hasText && !event.is_error && event.result) { hasText = true; this.emit({ type: 'message', messageId: event.uuid || randomUUID(), text: event.result, delta: false }) }
           const totals = Object.values(event.modelUsage || {}).reduce((sum, value) => ({
             inputTokens: sum.inputTokens + (value.inputTokens || 0) + (value.cacheReadInputTokens || 0) + (value.cacheCreationInputTokens || 0),
             outputTokens: sum.outputTokens + (value.outputTokens || 0),
           }), { inputTokens: 0, outputTokens: 0 })
           this.emit({ type: 'metrics', metrics: { ...totals, costUsd: event.total_cost_usd } })
+          const modelUsage = event.modelUsage?.[this.model] || (Object.keys(event.modelUsage || {}).length === 1 ? Object.values(event.modelUsage)[0] : undefined)
+          if (modelUsage?.contextWindow) { this.context = { ...this.context, windowTokens: modelUsage.contextWindow, updatedAt: Date.now() }; this.emit({ type: 'context', context: this.context }) }
+          if (typeof stream.getContextUsage === 'function') {
+            let timer
+            try {
+              const usage = await Promise.race([stream.getContextUsage({ detail: 'summary' }), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Context query timed out')), 3000) })])
+              this.context = { usedTokens: usage.totalTokens, windowTokens: usage.rawMaxTokens || usage.maxTokens, estimated: true, compacting: false, updatedAt: Date.now() }
+              this.emit({ type: 'context', context: this.context })
+            } catch { /* Older CLIs can still report per-response token usage above. */ } finally { clearTimeout(timer) }
+          }
           if (event.is_error) finalError = event.errors?.join('\n') || event.result || 'Claude no pudo completar la respuesta.'
         }
       }
     } finally {
       this.active = false
+      this.emit({ type: 'context', context: { compacting: false, updatedAt: Date.now() } })
       for (const [requestId, respond] of this.approvals) { respond({ allow: false }); this.emit({ type: 'resolved', requestId }) }
       this.approvals.clear()
       if (abort.signal.aborted) this.emit({ type: 'status', status: 'stopped' })
@@ -315,6 +366,7 @@ function createAgentManager(emit) {
   const initializing = new Map()
   return {
     async send(request) {
+      if (request.action === 'compact' && !request.sessionId) throw new Error('Inicia una conversación antes de compactar.')
       let instance = sessions.get(request.id)
       if (instance?.active) throw new Error('Este agente ya está trabajando.')
       if (!instance || instance.closed) {
@@ -327,7 +379,7 @@ function createAgentManager(emit) {
         catch (error) { instance.close(); sessions.delete(request.id); emit({ id: request.id, type: 'error', message: error.message }); throw error }
         finally { initializing.delete(request.id) }
       }
-      try { await instance.send(request.text, request) }
+      try { if (request.action === 'compact' && request.provider === 'codex') await instance.compact(); else await instance.send(request.action === 'compact' ? '/compact' : request.text, request) }
       catch (error) { emit({ id: request.id, type: 'error', message: error.message }); throw error }
     },
     stop: (id) => {

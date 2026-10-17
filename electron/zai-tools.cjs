@@ -42,10 +42,10 @@ async function files(root, signal) {
 }
 async function skills(cwd) {
   const result = []
-  for (const base of [path.join(cwd, '.agents/skills'), path.join(cwd, '.claude/skills'), path.join(os.homedir(), '.agents/skills'), path.join(os.homedir(), '.claude/skills')]) {
+  for (const base of [path.join(cwd, '.zai/skills'), path.join(cwd, '.agents/skills'), path.join(cwd, '.claude/skills'), path.join(cwd, '.codex/skills'), path.join(os.homedir(), '.zai/skills'), path.join(os.homedir(), '.agents/skills'), path.join(os.homedir(), '.claude/skills'), path.join(os.homedir(), '.codex/skills')]) {
     let dirs; try { dirs = await fs.readdir(base, { withFileTypes: true }) } catch { continue }
     for (const dir of dirs.slice(0, 100)) {
-      if (!dir.isDirectory()) continue
+      if (!dir.isDirectory() && !(dir.isSymbolicLink() && await fs.stat(path.join(base, dir.name)).then((s) => s.isDirectory()).catch(() => false))) continue
       const file = path.join(base, dir.name, 'SKILL.md')
       try { const stat = await fs.stat(file); if (stat.size > 150_000) continue; const content = await fs.readFile(file, 'utf8'); if (!result.some((v) => v.name === dir.name)) result.push({ name: dir.name, file, description: content.match(/^description:\s*(.*)$/m)?.[1]?.slice(0, 350) || content.split('\n').find((v) => v && !v.startsWith('---'))?.slice(0, 150) || '', content }) } catch { /* optional */ }
     }
@@ -103,7 +103,7 @@ async function performTool(name, args, context) {
   }
   throw new Error('Herramienta no disponible.')
 }
-module.exports = { definitions, projectPath, skills, instructions, performTool }
+module.exports = { definitions, projectPath, files, skills, instructions, performTool }
 // Enforce the schemas locally; tool arguments from a model are untrusted input.
 function validateArguments(schema, value, label = 'argumentos') {
   if (schema.type === 'object') {

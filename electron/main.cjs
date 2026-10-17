@@ -12,6 +12,8 @@ const { createAPIProfiles } = require('./api-profiles.cjs')
 const { apiCatalog, resolveAPISelection } = require('./api-catalog.cjs')
 const { createZaiRuntime } = require('./zai-runtime.cjs')
 const { createBackgrounds } = require('./backgrounds.cjs')
+const { createAttachments } = require('./attachments.cjs')
+const { createComposerCatalog, preparePrompt } = require('./composer.cjs')
 const { createBrowserController } = require('./browser-controller.cjs')
 
 if (process.env.ZAI_USER_DATA) app.setPath('userData', process.env.ZAI_USER_DATA)
@@ -63,7 +65,9 @@ const agents = createAgentManager((event) => {
 })
 const apiProfiles = createAPIProfiles({ directory: app.getPath('userData'), safeStorage })
 const backgrounds = createBackgrounds({ directory: path.join(app.getPath('userData'), 'backgrounds'), nativeImage, profiles: apiProfiles })
-const zaiRuntime = createZaiRuntime({ directory: path.join(app.getPath('userData'), 'agent-sessions'), profiles: apiProfiles, browserHub, emit: (event) => {
+const attachments = createAttachments({ directory: path.join(app.getPath('userData'), 'attachments'), nativeImage })
+const composerCatalog = createComposerCatalog()
+const zaiRuntime = createZaiRuntime({ directory: path.join(app.getPath('userData'), 'agent-sessions'), profiles: apiProfiles, browserHub, attachments, emit: (event) => {
   if (event.type === 'error' || event.type === 'status' && ['idle', 'stopped'].includes(event.status)) browserHub.setActive(event.id, false)
   emit('agent:event', event)
 } })
@@ -168,24 +172,46 @@ handle('app:finish-close', async () => {
 handle('agent:send', async (request) => {
   if (!request || !validId(request.id) || !['codex', 'claude', 'zai'].includes(request.provider) ||
       typeof request.text !== 'string' || !request.text.trim() || request.text.length > 200_000) throw new Error('Mensaje inválido')
+  if (request.action !== undefined && request.action !== 'compact') throw new Error('Acción inválida.')
+  if (request.action === 'compact' && !request.sessionId) throw new Error('Inicia una conversación antes de compactar.')
   for (const key of ['model', 'effort', 'speed']) if (request[key] !== undefined && (typeof request[key] !== 'string' || request[key].length > 200)) throw new Error('Configuración del agente inválida')
   if (agentStarts.has(request.id) || agents.active(request.id) || zaiRuntime.active(request.id)) throw new Error('Este agente ya está trabajando.')
   agentStarts.add(request.id)
   try {
     await directory(request.cwd)
     const catalog = request.provider === 'zai' ? await connectionCatalog(request.connectionId, false, request.model) : await catalogs.get(request.provider)
+    const images = request.action === 'compact' ? [] : await attachments.resolve(request.attachments)
+    let prepared = { text: request.text }
+    if (request.action !== 'compact' && (request.references?.length || /(?:^|\s)\$[a-zA-Z]/.test(request.text))) {
+      const options = await composerCatalog.get(request.provider, request.cwd)
+      if (options.error && /(?:^|\s)\$[a-zA-Z]/.test(request.text)) throw new Error(options.error)
+      prepared = await preparePrompt(request.text, request.provider, request.cwd, options, request.references)
+    }
     if (cancelledAgents.has(request.id)) return
     const access = permissions(request.permissions)
     const browserMcp = await browserHub.configureAgent(request.id, request.provider, access)
     if (cancelledAgents.has(request.id)) return
     browserHub.setActive(request.id, true)
     try {
-      if (request.provider === 'zai') { const selection = resolveAPISelection(catalog, request); return await zaiRuntime.send({ ...request, ...selection, vision: catalog.models.find((m) => m.id === selection.model)?.vision === true, permissions: access }) }
-      return await agents.send({ ...request, permissions: access, browserMcp, ...resolveSelection(catalog, request) })
+      if (request.provider === 'zai') {
+        const selection = resolveAPISelection(catalog, request), model = catalog.models.find((m) => m.id === selection.model)
+        if (images.length && model?.vision !== true) throw new Error('Este modelo no anuncia visión. Selecciona un modelo que admita imágenes para enviar el mensaje.')
+        return await zaiRuntime.send({ ...request, ...prepared, ...selection, images, vision: model?.vision === true, contextWindow: model?.contextWindow, maxOutputTokens: model?.maxOutputTokens, permissions: access })
+      }
+      return await agents.send({ ...request, ...prepared, images, permissions: access, browserMcp, ...resolveSelection(catalog, request) })
     }
     catch (error) { browserHub.setActive(request.id, false); throw error }
   } finally { agentStarts.delete(request.id); cancelledAgents.delete(request.id) }
 })
+handle('composer:options', async ({ provider, cwd, refresh } = {}) => {
+  if (!['codex', 'claude', 'zai'].includes(provider)) throw new Error('Agente inválido.')
+  await directory(cwd); return composerCatalog.get(provider, cwd, refresh === true)
+})
+handle('composer:files', async (cwd, query = '') => {
+  if (typeof query !== 'string' || query.length > 1000) throw new Error('Búsqueda inválida.')
+  await directory(cwd); return composerCatalog.files(cwd, query)
+})
+handle('composer:image', (request) => attachments.import(request))
 handle('agent:stop', (id) => { if (validId(id)) { if (agentStarts.has(id)) { cancelledAgents.add(id); emit('agent:event', { id, type: 'status', status: 'stopped' }) } browserHub.setActive(id, false); zaiRuntime.stop(id); return agents.stop(id) } })
 handle('agent:close', (id) => { if (validId(id)) { if (agentStarts.has(id)) cancelledAgents.add(id); browserHub.closeAgent(id); zaiRuntime.close(id); agents.close(id) } })
 handle('agent:respond', (id, requestId, response) => {
@@ -279,7 +305,7 @@ async function createWindow() {
 }
 app.whenReady().then(async () => {
   protocol.handle('zai-asset', async (request) => {
-    try { const url = new URL(request.url); if (url.hostname !== 'background' || url.search || url.hash) return new Response('', { status: 404 }); const data = await backgrounds.read(url.pathname.slice(1)); return new Response(data, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=86400', 'Access-Control-Allow-Origin': '*' } }) } catch { return new Response('', { status: 404 }) }
+    try { const url = new URL(request.url); if (!['background', 'attachment'].includes(url.hostname) || url.search || url.hash) return new Response('', { status: 404 }); const data = await (url.hostname === 'background' ? backgrounds : attachments).read(url.pathname.slice(1)); return new Response(data, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=86400', 'Access-Control-Allow-Origin': '*' } }) } catch { return new Response('', { status: 404 }) }
   })
   await createWindow()
 })
@@ -291,6 +317,7 @@ function shutdown() {
   zaiRuntime.dispose()
   apiProfiles.dispose()
   backgrounds.cancel()
+  composerCatalog.dispose()
   agents.dispose()
   catalogs.dispose()
   browserHub.dispose()

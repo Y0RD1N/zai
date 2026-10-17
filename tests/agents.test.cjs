@@ -2,6 +2,61 @@ const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const { CodexSession, ClaudeSession } = require('../electron/agents.cjs')
 const { codexModels, claudeModels, codexUsage, claudeUsage, claudeRateUsage, resolveSelection } = require('../electron/provider-data.cjs')
+test('Codex mide el último contexto y compacta mediante la operación nativa', async () => {
+  const events = [], calls = []
+  const session = new CodexSession({ id: 'context', cwd: '/tmp' }, (event) => events.push(event))
+  session.threadId = 'thread'
+  session.rpc = async (method, params) => { calls.push({ method, params }); return {} }
+  session.receive({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread', tokenUsage: { total: { inputTokens: 900000, outputTokens: 15000 }, last: { totalTokens: 24000 }, modelContextWindow: 128000 } } })
+  const context = events.find((e) => e.type === 'context').context
+  assert.equal(context.usedTokens, 24000); assert.equal(context.windowTokens, 128000)
+  await session.compact()
+  assert.deepEqual(calls, [{ method: 'thread/compact/start', params: { threadId: 'thread' } }])
+  await assert.rejects(session.compact(), /termine el turno/)
+  session.receive({ method: 'item/completed', params: { item: { id: 'compact', type: 'contextCompaction' } } })
+  session.receive({ method: 'turn/completed', params: { turn: { status: 'completed' } } })
+  assert.equal(session.active, false)
+  assert.equal(events.find((e) => e.tool?.id === 'compact').tool.status, 'completed')
+  assert.equal(events.at(-1).status, 'idle')
+})
+test('Claude transmite imágenes nativas, consulta el contexto y reconoce la compactación real', async () => {
+  const events = [], session = new ClaudeSession({ id: 'vision', cwd: '/tmp', sessionId: 'saved' }, (e) => events.push(e))
+  let content, done
+  const complete = new Promise((resolve) => { done = resolve })
+  const consume = session.consume.bind(session)
+  session.consume = async (...args) => { try { await consume(...args) } finally { done() } }
+  session.query = ({ prompt }) => {
+    const stream = (async function* () {
+      for await (const message of prompt) content = message.message.content
+      yield { type: 'system', subtype: 'init', model: 'claude-fixture' }
+      yield { type: 'assistant', message: { content: [], usage: { input_tokens: 10, cache_read_input_tokens: 100, cache_creation_input_tokens: 20, output_tokens: 5 } } }
+      yield { type: 'system', subtype: 'compact_boundary', uuid: 'boundary', compact_metadata: { trigger: 'manual', pre_tokens: 135, post_tokens: 50 } }
+      yield { type: 'result', modelUsage: { 'claude-fixture': { inputTokens: 9000, outputTokens: 2000, contextWindow: 200000 } } }
+    })()
+    stream.getContextUsage = async (options) => { assert.equal(options.detail, 'summary'); return { totalTokens: 55, rawMaxTokens: 200000 } }
+    return stream
+  }
+  await session.send('Mira @imagen1', { images: [{ reference: 'imagen1', name: 'captura.png', mimeType: 'image/png', data: 'aGVsbG8=' }] })
+  await complete
+  assert.equal(content[2].type, 'image'); assert.equal(content[2].source.data, 'aGVsbG8=')
+  assert.match(content[1].text, /@imagen1/)
+  assert.equal(events.find((e) => e.context?.usedTokens === 135).context.estimated, false)
+  const last = events.filter((e) => e.context?.usedTokens !== undefined).at(-1).context
+  assert.equal(last.usedTokens, 55); assert.equal(last.windowTokens, 200000)
+  assert.equal(events.some((e) => e.tool?.id === 'boundary' && e.tool.status === 'completed'), true)
+})
+test('los comandos locales de Claude muestran su salida y un reset adopta la nueva sesión', async () => {
+  const events = [], session = new ClaudeSession({ id: 'command', cwd: '/tmp', sessionId: 'old' }, (event) => events.push(event))
+  await session.consume((async function* () {
+    yield { type: 'system', subtype: 'local_command_output', session_id: 'old', uuid: 'output', content: 'Salida nativa del comando.' }
+    yield { type: 'conversation_reset', session_id: 'old', new_conversation_id: 'new' }
+    yield { type: 'result', session_id: 'new', result: 'Conversación nueva.', is_error: false }
+  })(), new AbortController())
+  assert.equal(events.find((e) => e.messageId === 'output').text, 'Salida nativa del comando.')
+  assert.equal(events.find((e) => e.type === 'reset').sessionId, 'new')
+  assert.equal(session.sessionId, 'new')
+  assert.equal(events.some((e) => e.text === 'Conversación nueva.'), true)
+})
 
 test('las aprobaciones esperan al usuario y conceden una sola operación', () => {
   const events = [], frames = []

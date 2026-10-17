@@ -49,6 +49,7 @@ export function hydrate(value: unknown): Workspace | null {
         },
         permissions: restorePermissions(p.permissions),
         width: clamp(Number(p.width) || 440, 250, 2400), height: clamp(Number(p.height) || 410, 190, 2000),
+        context: p.context ? { ...p.context, compacting: false } : undefined,
         messages: Array.isArray(p.messages) ? p.messages.filter((m) => m && typeof m.text === 'string' && ['user', 'assistant'].includes(m.role)) : [],
         timeline: Array.isArray(p.timeline) ? p.timeline.filter((item) => item && (item.kind === 'message' && typeof item.id === 'string' || item.kind === 'tool' && typeof item.tool?.id === 'string' && typeof item.tool.status === 'string')).map((item) => item.kind === 'tool' && item.tool.status === 'running' ? { ...item, tool: { ...item.tool, status: 'stopped' } } : item) : (p.messages || []).map((message) => ({ kind: 'message' as const, id: message.id })),
       }))

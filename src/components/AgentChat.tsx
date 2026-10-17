@@ -1,20 +1,24 @@
-import { memo, useEffect, useRef, useState } from 'react'
-import { ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, Copy, Folder, LoaderCircle, ShieldCheck, Square, X } from 'lucide-react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowUpRight, Check, ChevronDown, ChevronRight, Copy, Folder, LoaderCircle, ShieldCheck, Square, X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentRuntime, Approval, Panel, Project, ProviderCatalog, Tool, Message, PanelKind } from '../types'
+import type { AgentRuntime, Approval, Panel, Project, ProviderCatalog, Tool, Message, PanelKind, ChatSubmission, ImageAttachment } from '../types'
 import { ProviderMark } from './Brand'
 import { AgentControls, usageSummary } from './AgentControls'
+import { ChatComposer } from './ChatComposer'
+import { ContextMeter } from './ContextMeter'
+import { ImagePreview, ImageStrip } from './ChatImages'
 
 const ToolCard = memo(function ToolCard({ tool }: { tool: Tool }) {
   return <details className={`tool-card tool-${tool.status}`}><summary title={tool.status === 'stopped' ? 'Interrumpida' : undefined}>{tool.status === 'running' ? <LoaderCircle className="spin" size={13} /> : ['failed', 'declined'].includes(tool.status) ? <X size={13} /> : tool.status === 'stopped' ? <Square size={12} /> : <Check size={13} />}<span>{tool.name || 'Herramienta'}</span><code>{tool.detail?.split('\n')[0]?.slice(0, 65)}</code><ChevronDown size={12} /></summary>
     {tool.name === 'update_plan' && tool.status === 'completed' && (() => { try { const steps = JSON.parse(tool.output || '[]') as { text: string; status: string }[]; return <ol className="agent-plan">{steps.map((step, index) => <li key={index} className={`plan-${step.status}`}>{step.status === 'completed' ? <Check size={12} /> : <span className="plan-dot" />}{step.text}</li>)}</ol> } catch { return null } })()}{tool.detail && <pre>{tool.detail}</pre>}{tool.output && <pre className="tool-output">{tool.output}</pre>}</details>
 })
-const MessageView = memo(function MessageView({ message, kind, title, toast }: { message: Message; kind: PanelKind; title: string; toast: (text: string) => void }) {
+const MessageView = memo(function MessageView({ message, kind, title, toast, quote, preview }: { quote: (image: ImageAttachment) => void; preview: (reference: string) => void; message: Message; kind: PanelKind; title: string; toast: (text: string) => void }) {
   const [copied, setCopied] = useState(false)
   return <article data-chat-item={message.role} className={`message message-${message.role}`}>
     <div className="message-author">{message.role === 'assistant' ? <ProviderMark kind={kind} size={17} /> : <span className="user-dot">T</span>}<span>{message.role === 'assistant' ? title : 'Tú'}</span><time>{new Date(message.time).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>
-    <div className="markdown"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ href, children }) => <a href={href} onClick={(e) => { e.preventDefault(); if (href && /^https?:\/\//.test(href)) window.zai ? void window.zai.external(href) : window.open(href, '_blank', 'noopener,noreferrer') }}>{children}</a> }}>{message.text}</Markdown></div>
+    <div className="markdown"><Markdown urlTransform={(url) => /^zai-image:imagen[1-9]\d*$/.test(url) || /^(https?:|mailto:|#|\/)/.test(url) ? url : ''} remarkPlugins={[remarkGfm]} components={{ a: ({ href, children }) => <a href={href} onClick={(e) => { e.preventDefault(); if (href?.startsWith('zai-image:')) { preview(href.slice(10)); return } if (href && /^https?:\/\//.test(href)) window.zai ? void window.zai.external(href) : window.open(href, '_blank', 'noopener,noreferrer') }}>{children}</a> }}>{message.text.replace(/@imagen([1-9]\d*)\b/g, '[@imagen$1](zai-image:imagen$1)')}</Markdown></div>
+    {!!message.attachments?.length && <ImageStrip images={message.attachments} quote={quote} preview={(image) => preview(image.reference)} />}
     {message.role === 'assistant' && <button className="copy-message icon-button" aria-label="Copiar respuesta" onClick={async () => { try { await navigator.clipboard.writeText(message.text); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch { toast('No se pudo acceder al portapapeles.') } }}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
   </article>
 })
@@ -43,10 +47,12 @@ function Permission({ approval, panelId, toast }: { approval: Approval; panelId:
   </div>
 }
 export function AgentChat({ panel, project, runtime, catalog, catalogLoading, refreshCatalog, send, patch, chooseFolder, toast }: {
-  panel: Panel; project: Project; runtime: AgentRuntime; catalog?: ProviderCatalog; catalogLoading: boolean; refreshCatalog: () => void; send: (text: string) => Promise<void>
+  panel: Panel; project: Project; runtime: AgentRuntime; catalog?: ProviderCatalog; catalogLoading: boolean; refreshCatalog: () => void; send: (text: string, submission?: ChatSubmission) => Promise<void>
   patch: (patch: Partial<Panel>) => void; chooseFolder: () => void; toast: (text: string) => void
 }) {
   const [draft, setDraft] = useState('')
+  const [contextOpen, setContextOpen] = useState(false)
+  const [previewImage, setPreviewImage] = useState<ImageAttachment>()
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [optionsSection, setOptionsSection] = useState<'model' | 'usage' | 'permissions'>('model')
   const scroll = useRef<HTMLDivElement>(null)
@@ -57,13 +63,20 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
   const messageById = new Map(panel.messages.map((message) => [message.id, message]))
   const timeline = panel.timeline || panel.messages.map((message) => ({ kind: 'message' as const, id: message.id }))
   useEffect(() => { if (stickToBottom.current && (panel.messages.length || runtime.tools.length || runtime.approvals.length)) scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'instant' }) }, [panel.messages, panel.timeline, runtime.tools, runtime.approvals])
-  const submit = async () => {
-    if (!draft.trim() || busy) return
-    const text = draft.trim()
-    if (!window.zai) { toast('Abre la app de escritorio para conectar tus agentes locales.'); return }
-    if (!project.folder) { chooseFolder(); return }
-    setDraft('')
-    try { await send(text) } catch { setDraft(text) }
+  const imageLookup = useRef(new Map<string, ImageAttachment>())
+  imageLookup.current = new Map(panel.messages.flatMap((message) => message.attachments || []).map((image) => [image.reference, image]))
+  const draftRef = useRef(draft); draftRef.current = draft
+  const quote = useCallback((image: ImageAttachment) => {
+    const start = input.current?.selectionStart ?? draftRef.current.length, end = input.current?.selectionEnd ?? start
+    const value = `@${image.reference} `
+    setDraft(draftRef.current.slice(0, start) + value + draftRef.current.slice(end))
+    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(start + value.length, start + value.length) })
+  }, [])
+  const preview = useCallback((reference: string) => { const image = imageLookup.current.get(reference); if (image) setPreviewImage(image) }, [])
+  const command = (action: string) => {
+    if (action === 'context') setContextOpen(true)
+    else if (action === 'stop') void window.zai?.stop(panel.id).catch((error) => toast(String(error)))
+    else { setOptionsSection(action as 'model' | 'usage' | 'permissions'); setOptionsOpen(true) }
   }
   return <div className="agent-chat">
     <div className="chat-scroll" ref={scroll} onScroll={() => { const el = scroll.current; if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90 }}>
@@ -77,17 +90,16 @@ export function AgentChat({ panel, project, runtime, catalog, catalogLoading, re
         if (item.kind === 'tool') return <div className="timeline-tool" key={`tool:${item.tool.id}`} data-chat-item="tool" data-tool-id={item.tool.id}><ToolCard tool={item.tool} /></div>
         const message = messageById.get(item.id)
         if (!message) return null
-        return <MessageView key={message.id} message={message} kind={panel.kind} title={panel.title} toast={toast} />
+        return <MessageView key={message.id} message={message} kind={panel.kind} title={panel.title} toast={toast} quote={quote} preview={preview} />
       })}</div>}
       {runtime.approvals.map((approval) => <Permission key={approval.requestId} panelId={panel.id} approval={approval} toast={toast} />)}
       {runtime.error && <div className="chat-error"><span>La conexión necesita atención</span><p>{runtime.error}</p></div>}
       {busy && !runtime.approvals.length && <div className="working-indicator"><span /><span /><span /><small>{runtime.status === 'starting' ? `Conectando con ${panel.title}…` : `${panel.title} está trabajando`}</small></div>}
     </div>
     <div className="chat-bottom">
-      <div className={`composer ${busy ? 'busy' : ''}`}><textarea ref={input} rows={2} aria-label={`Mensaje para ${panel.title}`} placeholder={`Pídele a ${panel.title} lo que tienes en mente…`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }} />
-        <div className="composer-toolbar"><AgentControls panel={panel} catalog={catalog} loading={catalogLoading} runtime={runtime} busy={busy} open={optionsOpen} setOpen={setOptionsOpen} section={optionsSection} setSection={setOptionsSection} refresh={refreshCatalog} patch={patch} />{busy ? <button className="send-button stop-button" title="Detener agente" aria-label={`Detener ${panel.title}`} onClick={() => window.zai?.stop(panel.id).catch((e) => toast(String(e)))}><Square size={12} fill="currentColor" /></button> : <button className="send-button" title="Enviar mensaje" aria-label={`Enviar a ${panel.title}`} disabled={!draft.trim()} onClick={() => void submit()}><ArrowUp size={17} /></button>}</div>
-      </div>
-      <div className="chat-footline"><button className="chat-folder" title={project.folder || 'Vincular carpeta del proyecto'} onClick={chooseFolder}><Folder size={12} /><span>{project.folder ? project.folder.split(/[\\/]/).filter(Boolean).pop() : 'Vincular carpeta del proyecto'}</span><ChevronRight size={11} /></button><button className="chat-usage agent-option-trigger" aria-label={`Ver uso de ${panel.title}`} onClick={() => { setOptionsSection('usage'); setOptionsOpen(optionsSection !== 'usage' || !optionsOpen) }} title="Límites de la cuenta y consumo de la conversación">{catalogLoading && !catalog ? 'Consultando uso…' : usageSummary(catalog)}</button></div>
+      <ChatComposer panel={panel} project={project} runtime={runtime} draft={draft} setDraft={setDraft} input={input} send={send} command={command} chooseFolder={chooseFolder} toast={toast} controls={<AgentControls panel={panel} catalog={catalog} loading={catalogLoading} runtime={runtime} busy={busy} open={optionsOpen} setOpen={setOptionsOpen} section={optionsSection} setSection={setOptionsSection} refresh={refreshCatalog} patch={patch} />} />
+      <div className="chat-footline"><button className="chat-folder" title={project.folder || 'Vincular carpeta del proyecto'} onClick={chooseFolder}><Folder size={12} /><span>{project.folder ? project.folder.split(/[\\/]/).filter(Boolean).pop() : 'Vincular carpeta del proyecto'}</span><ChevronRight size={11} /></button><ContextMeter panel={panel} runtime={runtime} send={send} toast={toast} open={contextOpen} setOpen={setContextOpen} /><button className="chat-usage agent-option-trigger" aria-label={`Ver uso de ${panel.title}`} onClick={() => { setOptionsSection('usage'); setOptionsOpen(optionsSection !== 'usage' || !optionsOpen) }} title="Límites de la cuenta y consumo de la conversación">{catalogLoading && !catalog ? 'Consultando uso…' : usageSummary(catalog)}</button></div>
     </div>
+    {previewImage && <ImagePreview image={previewImage} close={() => setPreviewImage(undefined)} />}
   </div>
 }

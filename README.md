@@ -22,6 +22,9 @@ a tu gusto o conviértelas en iconos sin detener sus sesiones.
   Los agentes pueden leer y controlar los navegadores conectados con herramientas
   MCP propias. El hilo muestra pulsos al realizar acciones y devolver resultados.
 - Mensajes y herramientas en secuencia cronológica, conservada al reabrir la app.
+- Medidor de contexto y compactación manual en Codex, Claude y Zai Agent.
+  Imágenes pegadas, adjuntas o arrastradas al chat y citas con `@imagen1`.
+  Autocompletado de archivos con `@`, comandos con `/` y skills con `$`.
 - Ventanas movibles y redimensionables, ampliación, iconos movibles y organización
   automática. La barra superior reúne todas las ventanas minimizadas y permite
   restaurarlas, incluso desde otro proyecto o fuera del área visible. Los borradores y las páginas permanecen abiertos al minimizar.
@@ -136,6 +139,31 @@ personalizados no exponen estos límites; Zai lo indica y muestra el consumo de
 la conversación cuando el agente lo informa.
 Las operaciones que el proveedor someta a aprobación aparecerán en el chat.
 
+Pulsa el medidor junto al uso de la cuenta para ver los tokens del contexto activo
+y compactarlo. Codex utiliza `thread/compact/start`; Claude ejecuta su `/compact`;
+Zai Agent resume el historial y reemplaza el contexto solo si el resumen termina
+correctamente. La conversación visible se conserva. Los datos estimados llevan
+`≈`, los límites desconocidos se indican y el consumo acumulado se muestra aparte.
+La compactación puede consumir tokens del modelo configurado.
+
+En el campo de mensaje, `@` busca archivos de la carpeta vinculada e imágenes del
+chat; `/` ofrece las acciones de Zai y los comandos que Claude anuncia para el SDK;
+`$` lista las skills del agente y, en Codex, sus conexiones habilitadas cuando su
+CLI las publica. Las opciones aparecen al escribir o pulsar sus botones. Usa
+↑/↓ y Tab o Enter para insertarlas, Escape para cerrar y Enter para enviar.
+Los archivos seleccionados se incluyen como contexto de texto (hasta 150 KB por
+archivo y 300 KB en conjunto). Zai Agent descubre skills en `.zai/skills`,
+`.agents/skills`, `.claude/skills` y `.codex/skills`, del proyecto y del usuario.
+
+Pega una imagen con Ctrl+V (⌘V en macOS), arrástrala al campo o usa el clip.
+«Citar» inserta una referencia como `@imagen1`; también puedes volver a citar una
+imagen de mensajes anteriores después de compactar. Se admiten hasta 8 imágenes,
+5 MB por imagen y 20 MB por mensaje. PNG, JPEG, WebP y GIF se normalizan a PNG
+estático; los archivos se guardan en el directorio privado de Zai, separados del
+JSON de la pizarra. Las copias JSON contienen referencias, no los archivos de las
+imágenes. Zai Agent requiere que el modelo anuncie visión; un modelo de solo texto
+no recibe imágenes silenciosamente.
+
 El icono de escudo abre «Permisos». Codex permite elegir solo lectura, escritura
 en el proyecto o acceso completo, junto con su política de aprobaciones y acceso
 a red de los comandos. Claude ofrece sus modos nativos de aprobación. Las opciones
@@ -182,7 +210,7 @@ Si Fedora no tiene FUSE 2, puedes abrir el AppImage sin instalarlo utilizando el
 modo de extracción, también probado con el navegador y la terminal:
 
 ```sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.4.1-Linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./release/Zai-0.5.0-Linux-x86_64.AppImage
 ```
 
 La versión inicial se ha probado localmente en Fedora. El workflow de CI está
