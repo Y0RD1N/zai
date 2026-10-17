@@ -51,7 +51,9 @@ jobs:
             platform: Linux
             executable: release/linux-unpacked/zai
             arch: x64
-            build: npx electron-builder --linux AppImage rpm --x64 --publish never
+            build: >-
+              npx electron-builder --linux AppImage rpm --x64
+              '-c.linux.artifactName=Zai-${version}-Linux-x64.${ext}' --publish never
           - os: windows-latest
             platform: Windows
             executable: release/win-unpacked/Zai.exe
@@ -86,7 +88,7 @@ jobs:
       - run: npm run test:unit
       - run: npm run build
       - run: npx playwright install --with-deps chromium --only-shell
-      - run: npm test
+      - run: npm test -- --workers=2
       - name: Install RPM build tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y rpm
